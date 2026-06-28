@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '20'
       - name: Cache backend dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: backend-${{ runner.os }}-pip-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('Backend/requirements.txt') }}
@@ -92,7 +92,7 @@ jobs:
         with:
           node-version: '20'
       - name: Cache frontend dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: frontend-${{ runner.os }}-npm-${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('Frontend/package-lock.json') }}
