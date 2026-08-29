@@ -13,11 +13,11 @@
     tags and prompts interactively.
 
 .PARAMETER CreateGitTag
-    Create an annotated git tag matching the published image tag after push.
+    Deprecated compatibility switch. A matching annotated local git tag is now
+    always required and created before image builds.
 
 .PARAMETER PushGitTag
-    Push the matching git tag to origin after publish. Implies a local git tag
-    exists; if it does not, one is created first.
+    Push the matching git tag to origin after both images publish successfully.
 #>
 [CmdletBinding()]
 param(
@@ -34,6 +34,9 @@ $repoRoot = Get-PublishRepoRoot
 Set-Location $repoRoot
 
 $resolvedTag = Resolve-ReleaseTag -Tag $Tag
+$null = $CreateGitTag # Retained for CLI compatibility; tags are now always created.
+Assert-PublishReleaseSource -Tag $resolvedTag
+Ensure-ReleaseGitTag -Tag $resolvedTag
 $images = Get-PublishImageReferences -Tag $resolvedTag
 
 Write-Host "Publishing release tag '$resolvedTag'"
@@ -44,8 +47,8 @@ Invoke-RegistryLogin -Registry $images.Registry
 Invoke-PublishBuild -Images $images
 Invoke-PublishPush -Images $images
 
-if ($CreateGitTag -or $PushGitTag) {
-  Ensure-ReleaseGitTag -Tag $resolvedTag -Push:$PushGitTag
+if ($PushGitTag) {
+  Ensure-ReleaseGitTag -Tag $resolvedTag -Push
 }
 
 Write-Host "Publish complete."

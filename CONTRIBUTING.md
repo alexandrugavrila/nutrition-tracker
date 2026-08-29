@@ -25,9 +25,14 @@ This guide covers developer setup, branching, Docker workflows, API and migratio
 
 ---
 
-## Branching & Worktrees
+## Branching, Integration, and Releases
 
-Branch naming pattern: `<type>/<slug>` where `type` is one of `feature`, `bugfix`, `refactor`, or `housekeeping`.
+The repository uses two long-lived branches with distinct responsibilities:
+
+- `development` is the integration branch. Every feature, bugfix, refactor, housekeeping, and dependency branch starts from the latest `origin/development` and merges back into `development` through a pull request.
+- `main` is the release branch. It advances only when `development` is promoted for a release with a history-preserving merge commit.
+
+Branch naming pattern: `<type>/<slug>` where `type` is one of `feature`, `bugfix`, `refactor`, or `housekeeping`. There are no direct-to-`main` working branches or hotfix exceptions; change this policy explicitly before using a different flow.
 
 Recommended clone layout:
 
@@ -36,6 +41,8 @@ git clone <repo-url> C:\_Code\Nutrition\nutrition-main
 ```
 
 You can use any parent directory; the key is that the primary clone sits in its own folder so worktrees can be siblings. To override the parent directory used by scripts, set `NUTRITION_WORKTREE_PARENT` before running them.
+
+### Start a working branch
 
 Recommended flow when starting or updating a branch:
 
@@ -49,10 +56,11 @@ Recommended flow when starting or updating a branch:
 
    The command runs `sync-branches` (fetch, prune, create local tracking branches), `audit-worktrees` (ensures every branch maps to exactly one worktree, the default branch stays in the primary clone, and no worktree is detached), and `audit-container-sets` (flags Docker Compose projects for branches that no longer exist).
 
-2. Create or switch to the branch in Git:
+2. Update the local integration branch without rewriting it:
 
    ```pwsh
-   git switch -c feature/my-feature   # or git switch feature/my-feature
+   git -C ../nutrition-development fetch origin
+   git -C ../nutrition-development merge --ff-only origin/development
    ```
 
 3. Create or jump into the branch worktree:
@@ -61,7 +69,7 @@ Recommended flow when starting or updating a branch:
    pwsh ./scripts/switch-worktree-branch.ps1 feature/my-feature
    ```
 
-   The script fetches remote refs, creates local tracking branches for any remote-only branches, then creates `nutrition-feature-my-feature` under the worktree parent (default: parent of the primary clone; override with `NUTRITION_WORKTREE_PARENT`) if needed, checks out the branch there, and optionally opens VS Code. Pass `-SkipVSCode` to stay in the terminal or `-NewVSCodeWindow` for a new window.
+   For a new branch, the helper always uses the latest `origin/development` as its base, even when invoked from `nutrition-main`. Existing local or remote branches retain their existing ancestry. The script creates `nutrition-feature-my-feature` under the worktree parent (default: parent of the primary clone; override with `NUTRITION_WORKTREE_PARENT`), pushes a new branch with its upstream, and optionally opens VS Code. Pass `-SkipVSCode` to stay in the terminal or `-NewVSCodeWindow` for a new window.
 
 4. Verify the environment:
 
@@ -77,6 +85,8 @@ Worktree conventions:
 
 - `main` (or the repository's default branch) remains in the original clone (the "primary root").
 
+- `development` lives in `nutrition-development` and remains the sole integration target for working branches.
+
 - Every other branch should live in a dedicated directory named `nutrition-<sanitized-branch>` under the worktree parent (defaults to the parent of the primary clone). You can override the parent directory by setting `NUTRITION_WORKTREE_PARENT` before running the helpers.
 
 - The helpers error out on detached HEADs or mismatched worktree locations to avoid running the wrong stack.
@@ -87,6 +97,47 @@ Other repo utilities:
 - `pwsh ./scripts/repo/audit-worktrees.ps1`: report orphaned or misconfigured worktrees without fetching.
 - `pwsh ./scripts/repo/audit-container-sets.ps1`: flag Docker Compose projects whose branches no longer exist.
 - Bash equivalents for both commands live next to the PowerShell versions.
+
+### Integrate working branches
+
+1. Bring `origin/development` into the working branch and resolve conflicts there; never rewrite a shared branch after review has begun.
+2. Open the pull request with the working branch as the head and `development` as the base.
+3. Require green branch-policy, backend, frontend, migration/schema, and applicable smoke checks before merging.
+4. Do not open a working-branch pull request directly against `main`. Dependabot is configured to target `development` under the same rule.
+
+### Promote a release to `main`
+
+1. Pause merges to `development` while the release PR is open so the promoted commit remains unambiguous.
+2. Confirm `development` is green and contains every intended release change.
+3. Open a pull request with `development` as the head and `main` as the base.
+4. Merge with GitHub's **Create a merge commit** option. Do not squash, rebase, reset, force-push, or fast-forward `main`; the release commit must preserve both parents.
+5. Update the primary clone and verify the release topology:
+
+   ```pwsh
+   git -C ../nutrition-main fetch origin
+   git -C ../nutrition-main merge --ff-only origin/main
+   git -C ../nutrition-main merge-base --is-ancestor origin/development HEAD
+   git -C ../nutrition-main status --short --branch
+   ```
+
+6. From that clean `main` merge commit, create/push the release tag and publish matching images:
+
+   ```pwsh
+   pwsh ./scripts/prod/publish.ps1 -Tag <version> -PushGitTag
+   # Bash: ./scripts/prod/publish.sh <version> --push-git-tag
+   ```
+
+   The publish helper refuses non-`main`, dirty, stale, non-merge, or development-missing release sources. An existing tag must resolve to `HEAD`.
+
+7. Synchronize `development` to the release commit before resuming work:
+
+   ```pwsh
+   git -C ../nutrition-development fetch origin
+   git -C ../nutrition-development merge --ff-only origin/main
+   git -C ../nutrition-development push origin development
+   ```
+
+   With the release freeze still in effect, this is a non-destructive fast-forward. If `development` advanced unexpectedly, do not reset it; merge `main` back through a reviewed `main` → `development` synchronization PR.
 
 ---
 
@@ -343,11 +394,16 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
   - Call graph: relies on `scripts/lib/branch-env.*` and `scripts/lib/worktree.sh`; PowerShell version can invoke `scripts/env/activate-venv.ps1` during fixes.
 
 - `scripts/switch-worktree-branch.ps1`
-  - Purpose: fetch remote refs, create local tracking branches for remote-only branches, then interactively pick a local branch, jump to its dedicated worktree (creating it if needed), optionally open VS Code, optionally start Docker Compose, and always activate the virtualenv.
+  - Purpose: fetch remote refs, create new working branches from the latest `origin/development`, create local tracking branches for remote-only branches, then interactively pick a branch, jump to its dedicated worktree (creating it if needed), optionally open VS Code, optionally start Docker Compose, and always activate the virtualenv.
   - Flags/parameters: `-Branch`, `-SkipVSCode`, `-NewVSCodeWindow`, `-CopyEnv` (copies the current worktree `.env` into the target when missing), `-StartWorkspaceStack`, and `-Data <test|prod>` (required with `-StartWorkspaceStack`).
   - Call graph: invokes `scripts/env/activate-venv.ps1` and `scripts/docker/compose.ps1` when the corresponding switches are selected.
 
 ### Repository maintenance
+
+- `scripts/repo/check_branch_policy.py`
+  - Purpose: enforce pull-request targets, verify that a `main` update is a two-parent release merge whose second parent is the exact `origin/development` tip, and verify that release tags point at the current `origin/main` commit.
+  - Commands: `pull-request --base <branch> --head <branch>`, `main-push [--head <sha>]`, and `release-tag [--head <sha>]`.
+  - Call graph: `.github/workflows/branch-policy.yml` invokes the matching command for pull requests, pushes to `main`, and tag pushes.
 
 - `scripts/repo/check.ps1` / `scripts/repo/check.sh`
   - Purpose: one-stop repository hygiene command; optionally skip stages.
@@ -360,6 +416,12 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
       - Bash flags: `--no-fetch`, `--yes`, `--dry-run`, `-h|--help`.
     - Runs `scripts/repo/audit-worktrees.ps1|.sh` (no flags) to validate branch↔worktree mappings and naming conventions; prompts before removing orphans.
     - Runs `scripts/repo/audit-container-sets.ps1|.sh` (no flags, honours `$CONTAINER_SET_PREFIX`) to locate Compose stacks without matching branches; prompts before removal and exits non-zero if unresolved stacks remain.
+
+- `scripts/prod/publish.ps1` / `scripts/prod/publish.sh`
+  - Purpose: validate the release source, create or verify the matching annotated local git tag, and publish immutable backend/frontend images.
+  - Release-source requirements: clean `main`, `HEAD == origin/main`, exactly two parents, and `origin/development` as the second parent. Existing tags must resolve to `HEAD`.
+  - Flags: `-Tag` / positional tag and `-PushGitTag` / `--push-git-tag`. The older create-tag switches remain accepted for compatibility but are unnecessary because local tag creation is mandatory.
+  - Call graph: loads `scripts/lib/publish-utils.ps1|.sh`, builds both Dockerfiles, pushes both images, then optionally pushes the already-verified git tag.
 
 ### Database management
 
@@ -502,7 +564,17 @@ Additional tooling:
 
 ## Continuous Integration (GitHub Actions)
 
-The workflow contains a **backend** job and a **frontend** job.
+The CI workflow contains **backend**, **frontend**, and **production-smoke** jobs. A separate **branch-policy** workflow enforces the integration and release topology.
+
+### Branch-policy job
+
+- Working and dependency pull requests must target `development` and use an approved branch prefix.
+- Their head commit must contain the current `development` tip, so stale or incorrectly based branches must be non-destructively updated before merge.
+- Pull requests targeting `main` must come from `development`.
+- A push to `main` must be a two-parent merge commit whose second parent is the exact `origin/development` tip.
+- A pushed release tag must point at the current `origin/main` commit.
+- GitHub branch protection should require this `branch-policy` check on `main` and `development`; the repository workflow supplies the check, while the protection setting is configured in GitHub.
+- The exact ruleset and activation order are recorded in [`.github/BRANCH_PROTECTION.md`](.github/BRANCH_PROTECTION.md). Activate it only after the named checks exist on the default branch.
 
 ### Backend job
 
@@ -513,7 +585,7 @@ The workflow contains a **backend** job and a **frontend** job.
 - Runs `scripts/db/check-migration-drift.sh`; fails if migrations are missing.
 - Runs Alembic migrations against the service database.
 - Executes `scripts/db/update-api-schema.sh` to regenerate OpenAPI + TS types; fails if diffs remain.
-- Runs `./scripts/run-tests.sh --sync` (unit + frontend tests).
+- Runs backend tests with `pytest` after migration and generated-schema gates pass.
 - Cleans the database schema on exit.
 
 ### Frontend job
@@ -521,6 +593,12 @@ The workflow contains a **backend** job and a **frontend** job.
 - Installs Node 20.
 - Caches npm modules.
 - Runs `npm --prefix Frontend run lint` and `npm --prefix Frontend run build`.
+
+### Production-smoke job
+
+- Builds the production backend and frontend images.
+- Starts the production Compose database, runs explicit Alembic migrations, and starts the application stack.
+- Verifies edge and database-aware backend readiness endpoints before teardown.
 
 ---
 

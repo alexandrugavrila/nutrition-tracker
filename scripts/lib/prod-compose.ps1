@@ -125,7 +125,7 @@ function Set-ProdImageTag {
     $base = $withoutDigest
   }
 
-  return "$base:$Tag"
+  return "${base}:$Tag"
 }
 
 function Get-ProdServiceContainerId {

@@ -1,0 +1,54 @@
+name: Branch Policy
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+
+permissions:
+  contents: read
+
+jobs:
+  branch-policy:
+    name: branch-policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Fetch policy branches
+        run: |
+          git fetch --no-tags origin \
+            main:refs/remotes/origin/main \
+            development:refs/remotes/origin/development
+      - name: Validate branch and release flow
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          case "$EVENT_NAME:$REF_TYPE" in
+            pull_request:*)
+              python scripts/repo/check_branch_policy.py pull-request \
+                --base "$BASE_REF" --head "$HEAD_REF" \
+                --head-sha "$PR_HEAD_SHA"
+              ;;
+            push:branch)
+              python scripts/repo/check_branch_policy.py main-push \
+                --head "$EVENT_SHA"
+              ;;
+            push:tag)
+              python scripts/repo/check_branch_policy.py release-tag \
+                --head "$EVENT_SHA"
+              ;;
+            *)
+              echo "Unsupported branch-policy event: $EVENT_NAME:$REF_TYPE" >&2
+              exit 1
+              ;;
+          esac

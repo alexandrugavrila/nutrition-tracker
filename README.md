@@ -25,6 +25,7 @@ A full-stack nutrition planning and tracking app built with:
    ```pwsh
    pwsh ./scripts/switch-worktree-branch.ps1 feature/my-feature -CopyEnv
    ```
+   - New working branches are created from the latest `origin/development`, regardless of which worktree invokes the helper. Existing local or remote branches keep their existing history.
    - The script fetches remote refs, creates local tracking branches for remote-only branches, then creates `nutrition-feature-my-feature` under the worktree parent (default: parent of the primary clone) and reopens the folder in VS Code (use `-SkipVSCode` to opt out).
    - Worktrees let every branch mount its own code directory and Postgres volume, so multiple stacks can run in parallel.
 
@@ -66,6 +67,20 @@ A full-stack nutrition planning and tracking app built with:
 6. Visit the printed URLs or connect a SQL client using the database credentials you injected through environment variables (never commit real secrets).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow.
+
+---
+
+## Branch and Release Flow
+
+`development` is the integration branch and `main` is the release branch:
+
+1. Create `feature/*`, `bugfix/*`, `refactor/*`, and `housekeeping/*` branches from the latest `origin/development`.
+2. Merge working branches back into `development` through reviewed pull requests with green CI.
+3. Release by merging `development` into `main` with a merge commit that preserves both histories. Do not squash, rebase, reset, or force-push `main`.
+4. Tag and publish only the resulting clean `main` merge commit.
+5. Fast-forward `development` to the tagged release commit before starting the next development cycle.
+
+See [Branching, integration, and releases](CONTRIBUTING.md#branching-integration-and-releases) for exact commands, PR targets, and recovery rules.
 
 ---
 
@@ -184,28 +199,31 @@ What the publish script does:
 5. Pushes both images with the requested immutable tag.
 6. Prints the matching production deploy command for that tag.
 
-### Optional git-tag linkage
+### Git-tag linkage
 
 This repo does not currently have a single authoritative runtime version file
 that should be auto-updated during publish. The least fragile initial contract is:
 
 - release version = container tag
-- optional matching git tag = release record
+- matching annotated git tag = release record
 
-If you want the script to create or push a matching git tag after the images are
-published:
+The publish script requires a clean, synchronized `main` release merge. It
+creates the matching annotated tag locally before building images and refuses
+to reuse a tag that points at another commit. Pass the push option to publish
+the tag after the images succeed:
 
 ```bash
-./scripts/prod/publish.sh 1.2.0-alpha --create-git-tag --push-git-tag
+./scripts/prod/publish.sh 1.2.0-alpha --push-git-tag
 ```
 
 ```pwsh
-pwsh ./scripts/prod/publish.ps1 -Tag 1.2.0-alpha -CreateGitTag -PushGitTag
+pwsh ./scripts/prod/publish.ps1 -Tag 1.2.0-alpha -PushGitTag
 ```
 
 Recommendation:
 
 - Keep the container tag and git tag identical.
+- Publish only from the release merge commit on `main`; never publish from `development` or a working branch.
 - Do not auto-mutate `Frontend/package.json` or introduce a backend version file until the app actually needs to display or consume a runtime version.
 - Treat git tags as the release timeline, and container tags as the deployable artifact identifiers.
 
@@ -385,11 +403,11 @@ For a typical release on a real server:
 ## Key Helper Scripts
 
 - `pwsh ./scripts/repo/check.ps1`: fetch latest refs, audit worktrees, flag stale container stacks, and suggest fixes. Bash: `./scripts/repo/check.sh`.
-- `pwsh ./scripts/switch-worktree-branch.ps1`: fetch remote refs, sync local tracking branches, and create or hop between branch-dedicated worktrees (`-CopyEnv` can copy the current `.env` into the target).
+- `pwsh ./scripts/switch-worktree-branch.ps1`: fetch remote refs, create new working branches from `origin/development`, and create or hop between branch-dedicated worktrees (`-CopyEnv` can copy the current `.env` into the target).
 - `pwsh ./scripts/env/check.ps1 -Fix`: ensure you are inside the correct worktree with an activated virtualenv (Bash variant available).
 - `pwsh ./scripts/docker/compose.ps1 <up|down|restart>`: manage the per-branch Docker stack.
 - `pwsh ./scripts/db/migrate.ps1` / `./scripts/db/migrate.sh`: explicit migration job for deploy pipelines (run before app traffic).
-- `pwsh ./scripts/prod/publish.ps1 [-Tag <tag>] [-CreateGitTag] [-PushGitTag]` / `./scripts/prod/publish.sh [<tag>] [--create-git-tag] [--push-git-tag]`: build and publish immutable backend/frontend images using registry credentials from env or `.env.publish`.
+- `pwsh ./scripts/prod/publish.ps1 [-Tag <tag>] [-PushGitTag]` / `./scripts/prod/publish.sh [<tag>] [--push-git-tag]`: validate a clean `development` → `main` release merge, create/verify the matching local git tag, and publish immutable backend/frontend images using registry credentials from env or `.env.publish`.
 - `pwsh ./scripts/prod/backup.ps1 [-Label <label>]` / `./scripts/prod/backup.sh [--label <label>]`: create a production database snapshot plus metadata describing the current Alembic revision and image refs.
 - `pwsh ./scripts/prod/deploy.ps1 -Tag <tag>` / `./scripts/prod/deploy.sh <tag>`: create a pre-deploy snapshot, update production backend/frontend image tags, pull images, run Alembic migrations, refresh the prod stack, and verify the deployed endpoints.
 - `pwsh ./scripts/prod/migrate.ps1` / `./scripts/prod/migrate.sh`: run production Alembic migrations against `docker-compose.prod.yml` without tearing the stack down.
@@ -403,10 +421,12 @@ For a typical release on a real server:
 ## Worktrees & Branch Isolation
 
 - The default branch (`main`) lives in the primary clone.
+- `development` is the integration branch; all new working branches start from `origin/development` and return to `development` through pull requests.
+- Only a history-preserving `development` → `main` release merge may advance `main`; release tags belong on that merge commit.
 - Feature branches should run from dedicated worktrees named `nutrition-<sanitized-branch>`; set `NUTRITION_WORKTREE_PARENT` if you want them under a different parent directory.
 - Each worktree gets unique compose project names, container names, ports, and Postgres volumes via the branch-aware scripts.
 - Run `pwsh ./scripts/repo/sync-branches.ps1` to mirror new remote branches and `pwsh ./scripts/repo/audit-worktrees.ps1` to confirm every branch maps to exactly one worktree.
-- More details and troubleshooting live in [CONTRIBUTING.md](CONTRIBUTING.md#branching--worktrees).
+- More details and troubleshooting live in [CONTRIBUTING.md](CONTRIBUTING.md#branching-integration-and-releases).
 
 ---
 
