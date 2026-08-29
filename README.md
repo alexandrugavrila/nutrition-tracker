@@ -14,8 +14,8 @@ A full-stack nutrition planning and tracking app built with:
 1. Clone the repository (recommended layout keeps the primary clone under a parent `Nutrition` folder so worktrees are siblings).
 
    ```pwsh
-   git clone https://github.com/alexandrugavrila/Nutrition C:\_Code\Nutrition\nutrition-main
-   cd C:\_Code\Nutrition\nutrition-main
+   git clone https://github.com/alexandrugavrila/Nutrition C:\Workspace\projects\apps\nutrition-tracker\nutrition-main
+   cd C:\Workspace\projects\apps\nutrition-tracker\nutrition-main
    ```
 
    You can choose any parent directory; just keep the primary clone in its own subfolder.

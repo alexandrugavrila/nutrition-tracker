@@ -37,7 +37,7 @@ Branch naming pattern: `<type>/<slug>` where `type` is one of `feature`, `bugfix
 Recommended clone layout:
 
 ```pwsh
-git clone <repo-url> C:\_Code\Nutrition\nutrition-main
+git clone <repo-url> C:\Workspace\projects\apps\nutrition-tracker\nutrition-main
 ```
 
 You can use any parent directory; the key is that the primary clone sits in its own folder so worktrees can be siblings. To override the parent directory used by scripts, set `NUTRITION_WORKTREE_PARENT` before running them.
