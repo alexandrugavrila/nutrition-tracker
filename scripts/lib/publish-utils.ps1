@@ -3,6 +3,9 @@
 $script:PublishEnvCandidates = @('.env.publish', '.env')
 
 function Get-PublishRepoRoot {
+  if ($env:PUBLISH_REPO_ROOT) {
+    return (Resolve-Path $env:PUBLISH_REPO_ROOT).Path
+  }
   return (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 }
 
@@ -92,6 +95,94 @@ function Resolve-ReleaseTag {
   return $inputTag.Trim()
 }
 
+function Invoke-PublishGit {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $output = & git -C (Get-PublishRepoRoot) @Arguments 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "git $($Arguments -join ' ') failed:`n$output"
+  }
+  return ($output | Out-String).Trim()
+}
+
+function Assert-ReleaseTagFormat {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  if ($Tag -notmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+    throw "Release tag '$Tag' must use vMAJOR.MINOR.PATCH with an optional Docker-compatible pre-release suffix."
+  }
+}
+
+function Get-RemoteReleaseTagCommit {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  $repoRoot = Get-PublishRepoRoot
+  $output = & git -C $repoRoot ls-remote --exit-code --tags origin "refs/tags/$Tag" "refs/tags/$Tag^{}" 2>&1
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -eq 2) {
+    return $null
+  }
+  if ($exitCode -ne 0) {
+    throw "Unable to inspect release tag '$Tag' on origin:`n$output"
+  }
+
+  $lines = @($output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+  $peeled = $lines | Where-Object { $_ -match "refs/tags/$([regex]::Escape($Tag))\^\{\}$" } | Select-Object -First 1
+  $selected = if ($peeled) { $peeled } else { $lines | Select-Object -First 1 }
+  return ($selected -split '\s+')[0]
+}
+
+function Assert-PublishReleaseSource {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  $repoRoot = Get-PublishRepoRoot
+  Assert-ReleaseTagFormat -Tag $Tag
+  Invoke-PublishGit -Arguments @('check-ref-format', "refs/tags/$Tag") | Out-Null
+  $branch = Invoke-PublishGit -Arguments @('branch', '--show-current')
+  if ($branch -ne 'main') {
+    throw "Releases must be published from main. Current branch: '$branch'."
+  }
+
+  $status = Invoke-PublishGit -Arguments @('status', '--porcelain')
+  if ($status) {
+    throw "Release publishing requires a clean main worktree. Commit or stash local changes first."
+  }
+
+  Invoke-PublishGit -Arguments @(
+    'fetch', '--no-tags', 'origin',
+    '+refs/heads/main:refs/remotes/origin/main',
+    '+refs/heads/development:refs/remotes/origin/development'
+  ) | Out-Null
+
+  $head = Invoke-PublishGit -Arguments @('rev-parse', 'HEAD^{commit}')
+  $originMain = Invoke-PublishGit -Arguments @('rev-parse', 'origin/main^{commit}')
+  if ($head -ne $originMain) {
+    throw "Local main must exactly match origin/main before publishing. HEAD=$head origin/main=$originMain"
+  }
+
+  $development = Invoke-PublishGit -Arguments @('rev-parse', 'origin/development^{commit}')
+  $parents = (Invoke-PublishGit -Arguments @('rev-list', '--parents', '-n', '1', $head)) -split '\s+'
+  if ($parents.Count -ne 3 -or $parents[2] -ne $development) {
+    throw "HEAD must be the two-parent development -> main release merge, with origin/development as its second parent."
+  }
+
+  $remoteTagCommit = Get-RemoteReleaseTagCommit -Tag $Tag
+  if ($remoteTagCommit -and $remoteTagCommit -ne $head) {
+    throw "Release tag '$Tag' already exists on origin at $remoteTagCommit, not HEAD $head. Choose a new version."
+  }
+
+  & git -C $repoRoot show-ref --verify --quiet "refs/tags/$Tag"
+  if ($LASTEXITCODE -eq 0) {
+    $tagCommit = Invoke-PublishGit -Arguments @('rev-parse', "$Tag^{commit}")
+    if ($tagCommit -ne $head) {
+      throw "Release tag '$Tag' already points to $tagCommit, not HEAD $head."
+    }
+  }
+}
+
 function Get-RegistryHost {
   param([Parameter(Mandatory = $true)][string]$ImageRepository)
 
@@ -177,18 +268,23 @@ function Ensure-ReleaseGitTag {
   $exists = (& git -C $repoRoot tag --list $Tag 2>$null | Out-String).Trim()
   if (-not $exists) {
     Write-Host "Creating annotated git tag '$Tag'..."
-    & git -C $repoRoot tag -a $Tag -m "Release $Tag"
+    & git -C $repoRoot tag -a -m "Release $Tag" -- $Tag
     if ($LASTEXITCODE -ne 0) {
       throw "Failed to create git tag '$Tag'."
     }
   }
   else {
-    Write-Host "Git tag '$Tag' already exists locally."
+    $tagCommit = (& git -C $repoRoot rev-parse "$Tag^{commit}" 2>$null | Out-String).Trim()
+    $headCommit = (& git -C $repoRoot rev-parse 'HEAD^{commit}' 2>$null | Out-String).Trim()
+    if ($tagCommit -ne $headCommit) {
+      throw "Git tag '$Tag' points to $tagCommit, not HEAD $headCommit."
+    }
+    Write-Host "Git tag '$Tag' already exists locally and points to HEAD."
   }
 
   if ($Push) {
     Write-Host "Pushing git tag '$Tag' to origin..."
-    & git -C $repoRoot push origin $Tag
+    & git -C $repoRoot push origin "refs/tags/$Tag"
     if ($LASTEXITCODE -ne 0) {
       throw "Failed to push git tag '$Tag' to origin."
     }

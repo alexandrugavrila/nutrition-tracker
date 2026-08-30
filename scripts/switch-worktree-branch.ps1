@@ -4,7 +4,8 @@
     Jump to an existing worktree for a branch or create a new one.
 .DESCRIPTION
     Lists current worktrees, lets you pick a branch, and either changes directory to
-    the matching worktree or creates a fresh worktree for that branch.
+    the matching worktree or creates a fresh worktree for that branch. New branches
+    always start from the latest origin/development integration branch.
 .PARAMETER Branch
     Optional branch name or numeric selection. If omitted the script prompts.
 .PARAMETER SkipVSCode
@@ -312,24 +313,7 @@ if ($localBranchesWithoutWorktrees.Count -gt 0) {
     }
 }
 
-$currentBranch = Get-LastLine (Invoke-Git @('rev-parse','--abbrev-ref','HEAD'))
-$hasValidCurrentBranch = $currentBranch -and $currentBranch -ne 'HEAD'
-
-$defaultBase = "$remoteName/main"
-if ($hasValidCurrentBranch) {
-    $defaultBase = $currentBranch
-}
-else {
-    try {
-        $remoteHead = Get-LastLine (Invoke-Git @('symbolic-ref',"refs/remotes/$remoteName/HEAD"))
-        if ($remoteHead) {
-            $remoteHeadName = $remoteHead -replace "^refs/remotes/$remoteName/", ''
-            if ($remoteHeadName) { $defaultBase = "$remoteName/$remoteHeadName" }
-        }
-    } catch {
-        # ignore
-    }
-}
+$defaultBase = "$remoteName/development"
 
 if (-not $Branch) {
     if ($branchOptions.Count -gt 0) {
@@ -460,6 +444,9 @@ else {
     if ($remoteBranchExists) {
         $baseRef = "$remoteName/$Branch"
         $useTracking = $true
+    }
+    elseif (-not (Test-RemoteBranch -RemoteName $remoteName -Name 'development')) {
+        throw "Cannot create '$Branch': required integration branch '$remoteName/development' was not found."
     }
     elseif (-not $baseRef) {
         Write-Host 'Aborting.'

@@ -7,9 +7,12 @@ node_modules/
 
 # testing
 /coverage
+/playwright-report
+/test-results
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store

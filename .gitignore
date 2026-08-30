@@ -39,6 +39,9 @@ Frontend/build/
 Frontend/dist/
 Frontend/coverage/
 Frontend/public/static/
+Frontend/playwright-report/
+Frontend/test-results/
+.vite/
 
 # === Docker volumes and build artifacts ===
 pgdata/
