@@ -3,6 +3,9 @@
 $script:PublishEnvCandidates = @('.env.publish', '.env')
 
 function Get-PublishRepoRoot {
+  if ($env:PUBLISH_REPO_ROOT) {
+    return (Resolve-Path $env:PUBLISH_REPO_ROOT).Path
+  }
   return (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 }
 
@@ -105,10 +108,38 @@ function Invoke-PublishGit {
   return ($output | Out-String).Trim()
 }
 
+function Assert-ReleaseTagFormat {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  if ($Tag -notmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$') {
+    throw "Release tag '$Tag' must use vMAJOR.MINOR.PATCH with an optional Docker-compatible pre-release suffix."
+  }
+}
+
+function Get-RemoteReleaseTagCommit {
+  param([Parameter(Mandatory = $true)][string]$Tag)
+
+  $repoRoot = Get-PublishRepoRoot
+  $output = & git -C $repoRoot ls-remote --exit-code --tags origin "refs/tags/$Tag" "refs/tags/$Tag^{}" 2>&1
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -eq 2) {
+    return $null
+  }
+  if ($exitCode -ne 0) {
+    throw "Unable to inspect release tag '$Tag' on origin:`n$output"
+  }
+
+  $lines = @($output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+  $peeled = $lines | Where-Object { $_ -match "refs/tags/$([regex]::Escape($Tag))\^\{\}$" } | Select-Object -First 1
+  $selected = if ($peeled) { $peeled } else { $lines | Select-Object -First 1 }
+  return ($selected -split '\s+')[0]
+}
+
 function Assert-PublishReleaseSource {
   param([Parameter(Mandatory = $true)][string]$Tag)
 
   $repoRoot = Get-PublishRepoRoot
+  Assert-ReleaseTagFormat -Tag $Tag
   Invoke-PublishGit -Arguments @('check-ref-format', "refs/tags/$Tag") | Out-Null
   $branch = Invoke-PublishGit -Arguments @('branch', '--show-current')
   if ($branch -ne 'main') {
@@ -136,6 +167,11 @@ function Assert-PublishReleaseSource {
   $parents = (Invoke-PublishGit -Arguments @('rev-list', '--parents', '-n', '1', $head)) -split '\s+'
   if ($parents.Count -ne 3 -or $parents[2] -ne $development) {
     throw "HEAD must be the two-parent development -> main release merge, with origin/development as its second parent."
+  }
+
+  $remoteTagCommit = Get-RemoteReleaseTagCommit -Tag $Tag
+  if ($remoteTagCommit -and $remoteTagCommit -ne $head) {
+    throw "Release tag '$Tag' already exists on origin at $remoteTagCommit, not HEAD $head. Choose a new version."
   }
 
   & git -C $repoRoot show-ref --verify --quiet "refs/tags/$Tag"

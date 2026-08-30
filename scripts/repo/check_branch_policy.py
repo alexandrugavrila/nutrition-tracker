@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -15,6 +16,10 @@ WORKING_BRANCH_PREFIXES = (
     "refactor/",
     "housekeeping/",
     "dependabot/",
+)
+RELEASE_TAG_PATTERN = re.compile(
+    r"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$"
 )
 
 
@@ -75,6 +80,14 @@ def validate_release_tag(tag_commit_sha: str, main_sha: str) -> None:
         )
 
 
+def validate_release_tag_name(tag: str) -> None:
+    if not RELEASE_TAG_PATTERN.fullmatch(tag):
+        raise PolicyError(
+            f"Release tag {tag!r} must use vMAJOR.MINOR.PATCH with an optional "
+            "Docker-compatible pre-release suffix."
+        )
+
+
 def git_output(args: Sequence[str]) -> str:
     completed = subprocess.run(
         ["git", *args],
@@ -126,7 +139,9 @@ def check_main_push(head: str, development_ref: str) -> None:
     validate_release_merge(parent_line, development_sha)
 
 
-def check_release_tag(head: str, main_ref: str) -> None:
+def check_release_tag(head: str, main_ref: str, tag: str | None = None) -> None:
+    if tag:
+        validate_release_tag_name(tag)
     tag_commit = git_output(["rev-parse", f"{head}^{{commit}}"])
     main_sha = git_output(["rev-parse", f"{main_ref}^{{commit}}"])
     validate_release_tag(tag_commit, main_sha)
@@ -149,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
     release_tag = subparsers.add_parser("release-tag")
     release_tag.add_argument("--head", default="HEAD")
     release_tag.add_argument("--main-ref", default="origin/main")
+    release_tag.add_argument("--tag")
 
     return parser
 
@@ -169,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "main-push":
             check_main_push(args.head, args.development_ref)
         elif args.command == "release-tag":
-            check_release_tag(args.head, args.main_ref)
+            check_release_tag(args.head, args.main_ref, args.tag)
     except (PolicyError, subprocess.CalledProcessError) as exc:
         print(f"Branch policy failed: {exc}", file=sys.stderr)
         return 1

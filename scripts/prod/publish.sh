@@ -8,14 +8,14 @@ usage() {
 Usage: ./scripts/prod/publish.sh [<tag>] [--create-git-tag] [--push-git-tag]
 
 Requires a clean, synchronized main release merge, creates or verifies the
-matching annotated local git tag, reads registry settings from the environment,
-.env.publish, or .env, then builds and pushes both application images.
+matching annotated git tag locally and on origin, reads registry settings from
+the environment, .env.publish, or .env, then builds and pushes both application
+images. The tag-related switches are retained only for compatibility.
 USAGE
 }
 
 TAG=""
 CREATE_GIT_TAG=false
-PUSH_GIT_TAG=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
       CREATE_GIT_TAG=true
       ;;
     --push-git-tag)
-      PUSH_GIT_TAG=true
+      # Retained for compatibility; remote tag publication is mandatory.
       ;;
     -h|--help)
       usage
@@ -69,11 +69,8 @@ echo "  Frontend: $frontend_image"
 
 publish_registry_login "$registry"
 publish_build_images "$backend_image" "$frontend_image"
+publish_ensure_git_tag "$resolved_tag" true
 publish_push_images "$backend_image" "$frontend_image"
-
-if [[ "$PUSH_GIT_TAG" == true ]]; then
-  publish_ensure_git_tag "$resolved_tag" true
-fi
 
 echo "Publish complete."
 echo "Next deploy command:"

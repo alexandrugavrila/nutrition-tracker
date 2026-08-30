@@ -120,14 +120,14 @@ Other repo utilities:
    git -C ../nutrition-main status --short --branch
    ```
 
-6. From that clean `main` merge commit, create/push the release tag and publish matching images:
+6. From that clean `main` merge commit, create/push the release tag and publish matching images. Release identifiers must use `vMAJOR.MINOR.PATCH` with an optional pre-release suffix, such as `v1.3.0` or `v1.3.0-rc.1`:
 
    ```pwsh
-   pwsh ./scripts/prod/publish.ps1 -Tag <version> -PushGitTag
-   # Bash: ./scripts/prod/publish.sh <version> --push-git-tag
+   pwsh ./scripts/prod/publish.ps1 -Tag <version>
+   # Bash: ./scripts/prod/publish.sh <version>
    ```
 
-   The publish helper refuses non-`main`, dirty, stale, non-merge, or development-missing release sources. An existing tag must resolve to `HEAD`.
+   The publish helper refuses non-`main`, dirty, stale, non-merge, or development-missing release sources. It checks the exact tag on `origin` before building, builds both images, pushes the annotated Git tag to reserve the release identifier, and then pushes both images. A matching remote tag is accepted for a retry; a conflicting tag is rejected before Docker runs.
 
 7. Synchronize `development` to the release commit before resuming work:
 
@@ -137,7 +137,7 @@ Other repo utilities:
    git -C ../nutrition-development push origin development
    ```
 
-   With the release freeze still in effect, this is a non-destructive fast-forward. If `development` advanced unexpectedly, do not reset it; merge `main` back through a reviewed `main` → `development` synchronization PR.
+   With the release freeze still in effect, this is a non-destructive fast-forward performed only by the designated release manager or release-automation identity through the narrowly scoped `development` ruleset bypass. Ordinary work never uses that bypass. If `development` advanced unexpectedly, do not reset or bypass protection; merge `main` back through a reviewed `main` → `development` synchronization PR.
 
 ---
 
@@ -401,8 +401,8 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
 ### Repository maintenance
 
 - `scripts/repo/check_branch_policy.py`
-  - Purpose: enforce pull-request targets, verify that a `main` update is a two-parent release merge whose second parent is the exact `origin/development` tip, and verify that release tags point at the current `origin/main` commit.
-  - Commands: `pull-request --base <branch> --head <branch>`, `main-push [--head <sha>]`, and `release-tag [--head <sha>]`.
+  - Purpose: enforce pull-request targets, verify that a `main` update is a two-parent release merge whose second parent is the exact `origin/development` tip, and verify that standard `vMAJOR.MINOR.PATCH[-prerelease]` release tags point at the current `origin/main` commit.
+  - Commands: `pull-request --base <branch> --head <branch>`, `main-push [--head <sha>]`, and `release-tag [--head <sha>] [--tag <tag>]`.
   - Call graph: `.github/workflows/branch-policy.yml` invokes the matching command for pull requests, pushes to `main`, and tag pushes.
 
 - `scripts/repo/check.ps1` / `scripts/repo/check.sh`
@@ -418,10 +418,10 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
     - Runs `scripts/repo/audit-container-sets.ps1|.sh` (no flags, honours `$CONTAINER_SET_PREFIX`) to locate Compose stacks without matching branches; prompts before removal and exits non-zero if unresolved stacks remain.
 
 - `scripts/prod/publish.ps1` / `scripts/prod/publish.sh`
-  - Purpose: validate the release source, create or verify the matching annotated local git tag, and publish immutable backend/frontend images.
-  - Release-source requirements: clean `main`, `HEAD == origin/main`, exactly two parents, and `origin/development` as the second parent. Existing tags must resolve to `HEAD`.
-  - Flags: `-Tag` / positional tag and `-PushGitTag` / `--push-git-tag`. The older create-tag switches remain accepted for compatibility but are unnecessary because local tag creation is mandatory.
-  - Call graph: loads `scripts/lib/publish-utils.ps1|.sh`, builds both Dockerfiles, pushes both images, then optionally pushes the already-verified git tag.
+  - Purpose: validate the release source and version, create or verify the matching annotated Git tag locally and on `origin`, and publish immutable backend/frontend images.
+  - Release-source requirements: clean `main`, `HEAD == origin/main`, exactly two parents, `origin/development` as the second parent, and a `vMAJOR.MINOR.PATCH[-prerelease]` tag. Local and remote tags must resolve to `HEAD`.
+  - Flags: `-Tag` / positional tag. The older create/push-tag switches remain accepted for compatibility but are unnecessary because local and remote tag publication is mandatory.
+  - Call graph: loads `scripts/lib/publish-utils.ps1|.sh`, validates local and remote Git state, builds both Dockerfiles, pushes/verifies the Git tag on `origin`, and then pushes both images.
 
 ### Database management
 
@@ -572,7 +572,7 @@ The CI workflow contains **backend**, **frontend**, and **production-smoke** job
 - Their head commit must contain the current `development` tip, so stale or incorrectly based branches must be non-destructively updated before merge.
 - Pull requests targeting `main` must come from `development`.
 - A push to `main` must be a two-parent merge commit whose second parent is the exact `origin/development` tip.
-- A pushed release tag must point at the current `origin/main` commit.
+- A pushed release tag must match `vMAJOR.MINOR.PATCH[-prerelease]` and point at the current `origin/main` commit.
 - GitHub branch protection should require this `branch-policy` check on `main` and `development`; the repository workflow supplies the check, while the protection setting is configured in GitHub.
 - The exact ruleset and activation order are recorded in [`.github/BRANCH_PROTECTION.md`](.github/BRANCH_PROTECTION.md). Activate it only after the named checks exist on the default branch.
 

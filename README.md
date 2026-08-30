@@ -100,16 +100,16 @@ Manual production helper scripts:
 
 ```bash
 ./scripts/prod/backup.sh --label manual
-./scripts/prod/deploy.sh 1.2.0-alpha
+./scripts/prod/deploy.sh v1.2.0-alpha
 ./scripts/prod/migrate.sh
-./scripts/prod/rollback.sh 1.1.9
+./scripts/prod/rollback.sh v1.1.9
 ```
 
 ```pwsh
 pwsh ./scripts/prod/backup.ps1 -Label manual
-pwsh ./scripts/prod/deploy.ps1 -Tag 1.2.0-alpha
+pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
 pwsh ./scripts/prod/migrate.ps1
-pwsh ./scripts/prod/rollback.ps1 -Tag 1.1.9
+pwsh ./scripts/prod/rollback.ps1 -Tag v1.1.9
 ```
 
 The production helpers use `docker-compose.prod.yml` together with
@@ -183,11 +183,11 @@ If you do not pass a tag, the script prints the latest 3 local git tags and
 prompts you for the next tag. You can also provide the tag directly:
 
 ```bash
-./scripts/prod/publish.sh 1.2.0-alpha
+./scripts/prod/publish.sh v1.2.0-alpha
 ```
 
 ```pwsh
-pwsh ./scripts/prod/publish.ps1 -Tag 1.2.0-alpha
+pwsh ./scripts/prod/publish.ps1 -Tag v1.2.0-alpha
 ```
 
 What the publish script does:
@@ -196,8 +196,9 @@ What the publish script does:
 2. Logs into the container registry.
 3. Builds the backend image from `Backend/Dockerfile --target prod`.
 4. Builds the frontend image from `Frontend/Dockerfile`.
-5. Pushes both images with the requested immutable tag.
-6. Prints the matching production deploy command for that tag.
+5. Pushes or verifies the matching annotated Git tag on `origin`.
+6. Pushes both images with the requested immutable tag.
+7. Prints the matching production deploy command for that tag.
 
 ### Git-tag linkage
 
@@ -207,17 +208,19 @@ that should be auto-updated during publish. The least fragile initial contract i
 - release version = container tag
 - matching annotated git tag = release record
 
-The publish script requires a clean, synchronized `main` release merge. It
-creates the matching annotated tag locally before building images and refuses
-to reuse a tag that points at another commit. Pass the push option to publish
-the tag after the images succeed:
+The publish script requires a clean, synchronized `main` release merge and a
+`vMAJOR.MINOR.PATCH[-prerelease]` identifier. It checks both local and remote
+tags before building, creates the annotated tag locally, builds both images,
+pushes the tag to reserve the release identifier, and then pushes the images.
+A matching remote tag can be retried; a conflicting tag is rejected before
+Docker runs:
 
 ```bash
-./scripts/prod/publish.sh 1.2.0-alpha --push-git-tag
+./scripts/prod/publish.sh v1.2.0-alpha
 ```
 
 ```pwsh
-pwsh ./scripts/prod/publish.ps1 -Tag 1.2.0-alpha -PushGitTag
+pwsh ./scripts/prod/publish.ps1 -Tag v1.2.0-alpha
 ```
 
 Recommendation:
@@ -232,11 +235,11 @@ Recommendation:
 Once publish succeeds, deploy the same tag on the server:
 
 ```bash
-./scripts/prod/deploy.sh 1.2.0-alpha
+./scripts/prod/deploy.sh v1.2.0-alpha
 ```
 
 ```pwsh
-pwsh ./scripts/prod/deploy.ps1 -Tag 1.2.0-alpha
+pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
 ```
 
 ---
@@ -269,13 +272,13 @@ The intended production model is:
 Bash:
 
 ```bash
-./scripts/prod/deploy.sh 1.2.0-alpha
+./scripts/prod/deploy.sh v1.2.0-alpha
 ```
 
 PowerShell:
 
 ```pwsh
-pwsh ./scripts/prod/deploy.ps1 -Tag 1.2.0-alpha
+pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
 ```
 
 What the deploy script does:
@@ -313,7 +316,7 @@ When a new backend/frontend version is published:
 Example:
 
 ```bash
-./scripts/prod/deploy.sh 1.2.1
+./scripts/prod/deploy.sh v1.2.1
 ```
 
 The deploy script does not wipe data, delete volumes, run `down -v`, or attempt automatic rollback.
@@ -358,11 +361,11 @@ There are two rollback modes.
 App-image rollback only:
 
 ```bash
-./scripts/prod/rollback.sh 1.1.9
+./scripts/prod/rollback.sh v1.1.9
 ```
 
 ```pwsh
-pwsh ./scripts/prod/rollback.ps1 -Tag 1.1.9
+pwsh ./scripts/prod/rollback.ps1 -Tag v1.1.9
 ```
 
 This changes only `BACKEND_IMAGE` and `FRONTEND_IMAGE` in `.env.production`, pulls those images, and refreshes the stack. It does not restore the database. Use this only when the older app version is compatible with the current schema.
@@ -407,7 +410,7 @@ For a typical release on a real server:
 - `pwsh ./scripts/env/check.ps1 -Fix`: ensure you are inside the correct worktree with an activated virtualenv (Bash variant available).
 - `pwsh ./scripts/docker/compose.ps1 <up|down|restart>`: manage the per-branch Docker stack.
 - `pwsh ./scripts/db/migrate.ps1` / `./scripts/db/migrate.sh`: explicit migration job for deploy pipelines (run before app traffic).
-- `pwsh ./scripts/prod/publish.ps1 [-Tag <tag>] [-PushGitTag]` / `./scripts/prod/publish.sh [<tag>] [--push-git-tag]`: validate a clean `development` → `main` release merge, create/verify the matching local git tag, and publish immutable backend/frontend images using registry credentials from env or `.env.publish`.
+- `pwsh ./scripts/prod/publish.ps1 [-Tag <tag>]` / `./scripts/prod/publish.sh [<tag>]`: validate a clean `development` → `main` release merge and `vMAJOR.MINOR.PATCH[-prerelease]` identifier, create/verify the matching local and remote Git tag, and publish immutable backend/frontend images using registry credentials from env or `.env.publish`.
 - `pwsh ./scripts/prod/backup.ps1 [-Label <label>]` / `./scripts/prod/backup.sh [--label <label>]`: create a production database snapshot plus metadata describing the current Alembic revision and image refs.
 - `pwsh ./scripts/prod/deploy.ps1 -Tag <tag>` / `./scripts/prod/deploy.sh <tag>`: create a pre-deploy snapshot, update production backend/frontend image tags, pull images, run Alembic migrations, refresh the prod stack, and verify the deployed endpoints.
 - `pwsh ./scripts/prod/migrate.ps1` / `./scripts/prod/migrate.sh`: run production Alembic migrations against `docker-compose.prod.yml` without tearing the stack down.

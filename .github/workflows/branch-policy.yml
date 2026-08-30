@@ -6,7 +6,7 @@ on:
     branches:
       - main
     tags:
-      - "*"
+      - "v*"
 
 permissions:
   contents: read
@@ -32,6 +32,7 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           case "$EVENT_NAME:$REF_TYPE" in
             pull_request:*)
@@ -45,7 +46,7 @@ jobs:
               ;;
             push:tag)
               python scripts/repo/check_branch_policy.py release-tag \
-                --head "$EVENT_SHA"
+                --head "$EVENT_SHA" --tag "$TAG_NAME"
               ;;
             *)
               echo "Unsupported branch-policy event: $EVENT_NAME:$REF_TYPE" >&2

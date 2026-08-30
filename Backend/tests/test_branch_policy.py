@@ -6,6 +6,7 @@ from scripts.repo.check_branch_policy import (
     validate_pull_request,
     validate_release_merge,
     validate_release_tag,
+    validate_release_tag_name,
 )
 
 
@@ -60,6 +61,17 @@ def test_release_tag_must_equal_main():
 
     with pytest.raises(PolicyError):
         validate_release_tag("other", "release")
+
+
+@pytest.mark.parametrize("tag", ["v1.2.3", "v1.2.3-alpha", "v2.0.0-rc.1"])
+def test_release_tag_name_accepts_versioned_docker_tags(tag):
+    validate_release_tag_name(tag)
+
+
+@pytest.mark.parametrize("tag", ["1.2.3", "v01.2.3", "release/v1.2.3", "v1.2.3+build"])
+def test_release_tag_name_rejects_nonstandard_or_non_docker_tags(tag):
+    with pytest.raises(PolicyError):
+        validate_release_tag_name(tag)
 
 
 def test_integration_pr_must_contain_current_development(monkeypatch):

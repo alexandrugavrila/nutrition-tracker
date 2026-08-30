@@ -15,7 +15,7 @@
     "openapi-typescript-fetch": "^2.2.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^6.30.3",
+    "react-router-dom": "^7.18.3",
     "react-virtuoso": "^4.7.1",
     "react-window": "^1.8.10",
     "styled-components": "^6.1.8",
