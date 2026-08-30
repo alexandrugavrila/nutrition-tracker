@@ -258,8 +258,10 @@ def _start_temp_db() -> None:
         # Ensure env reflects the requested port
         _set_database_url_with_port(_db_port)
 
-    _log("Waiting for database to be ready (timeout 2 minutes)...")
+    _log("Waiting for sustained database readiness (timeout 2 minutes)...")
     deadline = time.time() + 120
+    consecutive_query_successes = 0
+    last_connection_error: Optional[Exception] = None
     while time.time() < deadline:
         result = subprocess.run(
             [
@@ -276,9 +278,33 @@ def _start_temp_db() -> None:
             stderr=subprocess.DEVNULL,
         )
         if result.returncode == 0:
-            return
+            try:
+                import psycopg2
+
+                connection = psycopg2.connect(
+                    os.environ["DATABASE_URL"], connect_timeout=2
+                )
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT 1")
+                        cursor.fetchone()
+                finally:
+                    connection.close()
+                consecutive_query_successes += 1
+                # The official Postgres image briefly accepts connections from a
+                # bootstrap server before stopping it and starting the final
+                # server. Requiring two successful SQL probes one second apart
+                # prevents callers from racing into that intentional restart.
+                if consecutive_query_successes >= 2:
+                    return
+            except Exception as exc:
+                last_connection_error = exc
+                consecutive_query_successes = 0
+        else:
+            consecutive_query_successes = 0
         time.sleep(1)
-    raise RuntimeError("Postgres did not become ready in 2 minutes")
+    detail = f": {last_connection_error}" if last_connection_error else ""
+    raise RuntimeError(f"Postgres did not become sustainably ready in 2 minutes{detail}")
 
 
 def _cleanup(
