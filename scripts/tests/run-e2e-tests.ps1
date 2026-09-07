@@ -37,6 +37,7 @@ $repoRoot = Resolve-Path "$PSScriptRoot/../.."
 Set-Location $repoRoot
 
 # Ensure virtual environment is active
+. "$PSScriptRoot/../lib/log.ps1"
 . "$PSScriptRoot/../lib/venv.ps1"
 Ensure-Venv
 
@@ -83,6 +84,7 @@ function Get-FrontendPort($proj) {
   return $null
 }
 
+$exit = 1
 try {
   # Always stand up a dedicated TEST stack on TEST ports and project name
   $envFile = [System.IO.Path]::GetTempFileName()

@@ -66,7 +66,23 @@ const usdaDetailResponse = {
   ],
 };
 
-const getDialog = (page: Page): Locator => page.getByRole("dialog").last();
+const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getTitledDialog = (page: Page, title: string): Locator =>
+  page.getByRole("dialog", {
+    name: new RegExp(`^${escapeRegex(title)}(?:\\s+close)?$`),
+  });
+
+const getTableDialog = (page: Page, heading: "Foods" | "Ingredients"): Locator =>
+  page.getByRole("dialog").filter({
+    has: page.getByRole("heading", { name: heading, exact: true }),
+  });
+
+const getPreferredShoppingUnit = (dialog: Locator): Locator =>
+  dialog.getByRole("combobox", { name: "Preferred shopping unit" });
+
+const getDataPanel = (page: Page, name: "Foods" | "Ingredients"): Locator =>
+  page.getByRole("tabpanel", { name });
 
 const roundForUi = (value: number): string => {
   const rounded = Number.parseFloat(value.toPrecision(3));
@@ -117,25 +133,26 @@ async function addManualIngredient(page: Page): Promise<void> {
   await gotoDataTab(page, "Ingredients");
 
   await page.getByRole("button", { name: /^Add Ingredient$/ }).click();
-  const dialog = getDialog(page);
+  const dialog = getTitledDialog(page, "Add Ingredient");
 
   await dialog.getByLabel("Name").fill(manualIngredientName);
   await dialog.getByRole("button", { name: "add ingredient unit" }).click();
 
-  const unitDialog = getDialog(page);
+  const unitDialog = getTitledDialog(page, "Add Unit");
   await unitDialog.getByLabel("Unit name").fill("cup");
   await unitDialog.getByLabel("Unit grams").fill("100");
   await unitDialog.getByRole("button", { name: /^Add$/ }).click();
+  await expect(unitDialog).toBeHidden();
 
-  await chooseOption(dialog.getByLabel("Preferred shopping unit"), page, "g");
+  await chooseOption(getPreferredShoppingUnit(dialog), page, "g");
   await dialog.getByLabel("Calories").fill("2");
   await dialog.getByLabel("Protein").fill("0.5");
   await dialog.getByLabel("Carbs").fill("0.25");
   await dialog.getByLabel("Fat").fill("0.1");
   await dialog.getByLabel("Fiber").fill("0.05");
-  await chooseOption(dialog.getByLabel("Preferred shopping unit"), page, "cup");
+  await chooseOption(getPreferredShoppingUnit(dialog), page, "cup");
 
-  await dialog.getByRole("button", { name: "add ingredient" }).click();
+  await dialog.getByRole("button", { name: "add ingredient", exact: true }).click();
   await expect(dialog).toBeHidden();
 
   const ingredientRow = page.getByRole("row", { name: new RegExp(manualIngredientName) });
@@ -148,7 +165,7 @@ async function addUsdaIngredient(page: Page): Promise<void> {
   await gotoDataTab(page, "Ingredients");
 
   await page.getByRole("button", { name: /^Add Ingredient$/ }).click();
-  const dialog = getDialog(page);
+  const dialog = getTitledDialog(page, "Add Ingredient");
 
   await chooseOption(dialog.getByLabel("Source"), page, "USDA");
   await dialog.getByLabel("Search USDA").fill("banana");
@@ -158,22 +175,23 @@ async function addUsdaIngredient(page: Page): Promise<void> {
   await expect(dialog.getByLabel("Name")).toHaveValue(usdaIngredientName);
   await expect(dialog.getByText(/USDA-sourced nutrition is read-only/i)).toBeVisible();
 
-  await expect(dialog.getByLabel("Preferred shopping unit")).toContainText(USDA_DEFAULT_UNIT_NAME);
-  await chooseOption(dialog.getByLabel("Preferred shopping unit"), page, "g");
+  await expect(getPreferredShoppingUnit(dialog)).toContainText(USDA_DEFAULT_UNIT_NAME);
+  await chooseOption(getPreferredShoppingUnit(dialog), page, "g");
   await expect(dialog.getByLabel("Calories")).toHaveValue("1");
   await expect(dialog.getByLabel("Protein")).toHaveValue("0.2");
 
-  await chooseOption(dialog.getByLabel("Preferred shopping unit"), page, USDA_DEFAULT_UNIT_NAME);
+  await chooseOption(getPreferredShoppingUnit(dialog), page, USDA_DEFAULT_UNIT_NAME);
   await expect(dialog.getByLabel("Calories")).toHaveValue("50");
 
-  await dialog.getByRole("button", { name: "add ingredient" }).click();
+  await dialog.getByRole("button", { name: "add ingredient", exact: true }).click();
   await expect(dialog).toBeHidden();
 }
 
 async function searchIngredient(page: Page, ingredientName: string): Promise<Locator> {
-  const search = page.getByLabel("Search by name");
+  const ingredientPanel = getDataPanel(page, "Ingredients");
+  const search = ingredientPanel.getByLabel("Search by name");
   await search.fill(ingredientName);
-  const row = page.getByRole("row", { name: new RegExp(ingredientName) });
+  const row = ingredientPanel.getByRole("row", { name: new RegExp(ingredientName) });
   await expect(row).toBeVisible();
   return row;
 }
@@ -181,44 +199,45 @@ async function searchIngredient(page: Page, ingredientName: string): Promise<Loc
 async function reopenIngredient(page: Page, ingredientName: string): Promise<Locator> {
   const row = await searchIngredient(page, ingredientName);
   await row.getByRole("button", { name: `Edit ingredient ${ingredientName}` }).click();
-  return getDialog(page);
+  return getTitledDialog(page, "Edit Ingredient");
 }
 
 async function addFood(page: Page): Promise<void> {
   await gotoDataTab(page, "Foods");
 
   await page.getByRole("button", { name: /^Add Food$/ }).click();
-  const form = page.locator("body");
+  const form = getDataPanel(page, "Foods");
 
-  await form.getByLabel("Name").fill(foodName);
+  await form.getByLabel("Name", { exact: true }).fill(foodName);
   await form.getByLabel("Recipe yields").fill("5");
   await form.getByRole("button", { name: "Add Ingredients" }).click();
 
-  const ingredientDialog = getDialog(page);
+  const ingredientDialog = getTableDialog(page, "Ingredients");
   await ingredientDialog.getByLabel("Search by name").fill(manualIngredientName);
   await ingredientDialog.getByRole("button", { name: `Select ingredient ${manualIngredientName}` }).click();
   await expect(ingredientDialog).toBeHidden();
 
   await form.getByRole("button", { name: "Add Ingredients" }).click();
-  const secondIngredientDialog = getDialog(page);
+  const secondIngredientDialog = getTableDialog(page, "Ingredients");
   await secondIngredientDialog.getByLabel("Search by name").fill(usdaIngredientName);
   await secondIngredientDialog.getByRole("button", { name: `Select ingredient ${usdaIngredientName}` }).click();
   await expect(secondIngredientDialog).toBeHidden();
 
-  const manualRow = page.getByRole("row", { name: new RegExp(manualIngredientName) });
-  const usdaRow = page.getByRole("row", { name: new RegExp(usdaIngredientName) });
+  const manualRow = form.getByRole("row", { name: new RegExp(manualIngredientName) });
+  const usdaRow = form.getByRole("row", { name: new RegExp(usdaIngredientName) });
 
   await manualRow.getByRole("spinbutton").fill("2");
   await usdaRow.getByRole("spinbutton").fill("3");
 
-  await page.getByRole("button", { name: "add food" }).click();
-  await expect(page.getByLabel("Name")).toHaveValue("");
+  await form.getByRole("button", { name: "add food", exact: true }).click();
+  await expect(form.getByLabel("Name", { exact: true })).toHaveValue("");
 }
 
 async function reopenFood(page: Page): Promise<void> {
   await gotoDataTab(page, "Foods");
-  await page.getByLabel("Search by name").fill(foodName);
-  const row = page.getByRole("row", { name: new RegExp(foodName) });
+  const foodPanel = getDataPanel(page, "Foods");
+  await foodPanel.getByLabel("Search by name").fill(foodName);
+  const row = foodPanel.getByRole("row", { name: new RegExp(foodName) });
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: `Edit food ${foodName}` }).click();
 }
@@ -239,7 +258,7 @@ test("creates a manual ingredient with units and a preferred shopping unit", asy
 
   const dialog = await reopenIngredient(page, manualIngredientName);
   await expect(dialog.getByLabel("Name")).toHaveValue(manualIngredientName);
-  await expect(dialog.getByLabel("Preferred shopping unit")).toContainText("cup");
+  await expect(getPreferredShoppingUnit(dialog)).toContainText("cup");
   await expect(dialog.getByLabel("Calories")).toHaveValue("200");
   await dialog.getByRole("button", { name: "close" }).click();
 });
@@ -249,9 +268,9 @@ test("imports a USDA ingredient and reloads the saved default unit and per-gram 
 
   const dialog = await reopenIngredient(page, usdaIngredientName);
   await expect(dialog.getByLabel("Source")).toContainText("USDA");
-  await expect(dialog.getByLabel("Preferred shopping unit")).toContainText(USDA_DEFAULT_UNIT_NAME);
+  await expect(getPreferredShoppingUnit(dialog)).toContainText(USDA_DEFAULT_UNIT_NAME);
 
-  await chooseOption(dialog.getByLabel("Preferred shopping unit"), page, "g");
+  await chooseOption(getPreferredShoppingUnit(dialog), page, "g");
   await expect(dialog.getByLabel("Calories")).toHaveValue("1");
   await expect(dialog.getByLabel("Protein")).toHaveValue("0.2");
 });
@@ -260,10 +279,12 @@ test("creates a food with recipe yield normalization and reloads persisted ingre
   await addFood(page);
   await reopenFood(page);
 
-  const manualRow = page.getByRole("row", { name: new RegExp(manualIngredientName) });
-  const usdaRow = page.getByRole("row", { name: new RegExp(usdaIngredientName) });
+  const foodPanel = getDataPanel(page, "Foods");
 
-  await expect(page.getByLabel("Recipe yields")).toHaveValue("1");
+  const manualRow = foodPanel.getByRole("row", { name: new RegExp(manualIngredientName) });
+  const usdaRow = foodPanel.getByRole("row", { name: new RegExp(usdaIngredientName) });
+
+  await expect(foodPanel.getByLabel("Recipe yields")).toHaveValue("1");
   await expect(manualRow.getByRole("spinbutton")).toHaveValue("0.4");
   await expect(usdaRow.getByRole("spinbutton")).toHaveValue("0.6");
 
@@ -276,13 +297,13 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   await expect(page.getByRole("heading", { name: "Planning" })).toBeVisible();
 
   await page.getByRole("button", { name: "Add Food" }).click();
-  const foodDialog = getDialog(page);
+  const foodDialog = getTableDialog(page, "Foods");
   await foodDialog.getByLabel("Search by name").fill(foodName);
   await foodDialog.getByRole("button", { name: `Select food ${foodName}` }).click();
   await expect(foodDialog).toBeHidden();
 
   await page.getByRole("button", { name: "Add Ingredient" }).click();
-  const ingredientDialog = getDialog(page);
+  const ingredientDialog = getTableDialog(page, "Ingredients");
   await ingredientDialog.getByLabel("Search by name").fill(manualIngredientName);
   await ingredientDialog.getByRole("button", { name: `Select ingredient ${manualIngredientName}` }).click();
   await expect(ingredientDialog).toBeHidden();
@@ -291,6 +312,7 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   const ingredientRow = page.getByRole("row", { name: new RegExp(manualIngredientName) });
 
   await foodRow.getByRole("spinbutton").fill("1");
+  await chooseOption(ingredientRow.getByRole("combobox"), page, "cup");
   await ingredientRow.getByLabel("planned portions").fill("2");
 
   const summary = page.locator("table").filter({ has: page.getByText("Total Overall") }).first();
@@ -298,11 +320,11 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   await expect(summary.getByRole("row", { name: /Per Day/ })).toContainText("510");
 
   await page.getByRole("button", { name: "Save Plan" }).click();
-  const saveDialog = getDialog(page);
+  const saveDialog = getTitledDialog(page, "Save Plan");
   await saveDialog.getByLabel("Plan name").fill(planName);
   await saveDialog.getByRole("button", { name: "Save as New" }).click();
   await expect(saveDialog).toBeHidden();
-  await expect(page.getByText(`Saved plan "${planName}"`)).toBeVisible();
+  await expect(page.getByText(`Saved plan "${planName}"`, { exact: true })).toBeVisible();
 
   await navigateWithDrawer(page, "Shopping");
   const shoppingManualRow = page.getByRole("row", { name: new RegExp(manualIngredientName) });
@@ -314,14 +336,18 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   await expect(shoppingUsdaRow).toContainText("0.6");
 
   await navigateWithDrawer(page, "Cooking");
-  await page.getByRole("button", { name: `Mark ${foodName} complete` }).click();
+  const cookingFoodRow = page.getByRole("row", { name: new RegExp(foodName) });
+  await cookingFoodRow.getByRole("button", { name: "Mark complete", exact: true }).click();
 
   await navigateWithDrawer(page, "Logging");
-  const fridgeRow = page.getByRole("row", { name: new RegExp(foodName) });
+  const fridgeTable = page.getByRole("table").filter({
+    has: page.getByRole("columnheader", { name: "Remaining portions" }),
+  });
+  const fridgeRow = fridgeTable.getByRole("row", { name: new RegExp(foodName) });
   await expect(fridgeRow).toContainText("1");
 
   await fridgeRow.getByLabel(`Portions to log for ${foodName}`).fill("0.5");
-  await fridgeRow.getByRole("button", { name: `Add ${foodName} to log` }).click();
+  await fridgeRow.getByRole("button", { name: "Add to log", exact: true }).click();
 
   await expect(fridgeRow).toContainText("0.5");
   const dailyTotal = page.getByRole("group", { name: /Daily Total/i });
@@ -331,8 +357,8 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   await expect(dailyTotal.getByLabel("Total fat")).toHaveText("2.75");
   await expect(dailyTotal.getByLabel("Total fiber")).toHaveText("2.5");
 
-  await fridgeRow.getByRole("button", { name: `Remove stored item ${foodName}` }).click();
-  await expect(page.getByRole("row", { name: new RegExp(foodName) })).toHaveCount(1);
+  await fridgeRow.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(fridgeRow).toHaveCount(0);
   await expect(dailyTotal.getByLabel("Total calories")).toHaveText("55");
-  await expect(page.getByRole("row", { name: new RegExp(`${foodName}.*55`) })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Entry from .* 0\.5 55/ })).toBeVisible();
 });

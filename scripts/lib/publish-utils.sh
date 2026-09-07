@@ -4,9 +4,50 @@
 set -euo pipefail
 
 publish_repo_root() {
+  if [[ -n "${PUBLISH_REPO_ROOT:-}" ]]; then
+    (
+      cd "$PUBLISH_REPO_ROOT" && pwd
+    )
+    return
+  fi
   (
     cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
   )
+}
+
+publish_assert_release_tag_format() {
+  local tag=$1
+  if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+    echo "Release tag '$tag' must use vMAJOR.MINOR.PATCH with an optional Docker-compatible pre-release suffix." >&2
+    return 1
+  fi
+}
+
+publish_remote_release_tag_commit() {
+  local tag=$1 repo_root output status commit
+  repo_root="$(publish_repo_root)"
+
+  if output="$(git -C "$repo_root" ls-remote --exit-code --tags origin \
+    "refs/tags/$tag" "refs/tags/$tag^{}" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 2 ]]; then
+    return 0
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "Unable to inspect release tag '$tag' on origin:" >&2
+    echo "$output" >&2
+    return 1
+  fi
+
+  commit="$(awk -v ref="refs/tags/$tag^{}" '$2 == ref { print $1; exit }' <<<"$output")"
+  if [[ -z "$commit" ]]; then
+    commit="$(awk 'NR == 1 { print $1 }' <<<"$output")"
+  fi
+  printf '%s\n' "$commit"
 }
 
 publish_get_env_value() {
@@ -85,6 +126,58 @@ publish_resolve_tag() {
   printf '%s\n' "$input_tag"
 }
 
+publish_assert_release_source() {
+  local tag=$1 repo_root branch status head origin_main development parent_line remote_tag_commit
+  local -a parents
+  repo_root="$(publish_repo_root)"
+  publish_assert_release_tag_format "$tag"
+  git -C "$repo_root" check-ref-format "refs/tags/$tag"
+  branch="$(git -C "$repo_root" branch --show-current)"
+  if [[ "$branch" != "main" ]]; then
+    echo "Releases must be published from main. Current branch: '$branch'." >&2
+    return 1
+  fi
+
+  status="$(git -C "$repo_root" status --porcelain)"
+  if [[ -n "$status" ]]; then
+    echo "Release publishing requires a clean main worktree. Commit or stash local changes first." >&2
+    return 1
+  fi
+
+  git -C "$repo_root" fetch --no-tags origin \
+    '+refs/heads/main:refs/remotes/origin/main' \
+    '+refs/heads/development:refs/remotes/origin/development'
+  head="$(git -C "$repo_root" rev-parse 'HEAD^{commit}')"
+  origin_main="$(git -C "$repo_root" rev-parse 'origin/main^{commit}')"
+  if [[ "$head" != "$origin_main" ]]; then
+    echo "Local main must exactly match origin/main before publishing. HEAD=$head origin/main=$origin_main" >&2
+    return 1
+  fi
+
+  development="$(git -C "$repo_root" rev-parse 'origin/development^{commit}')"
+  parent_line="$(git -C "$repo_root" rev-list --parents -n 1 "$head")"
+  read -r -a parents <<<"$parent_line"
+  if [[ ${#parents[@]} -ne 3 || "${parents[2]}" != "$development" ]]; then
+    echo "HEAD must be the two-parent development -> main release merge, with origin/development as its second parent." >&2
+    return 1
+  fi
+
+  remote_tag_commit="$(publish_remote_release_tag_commit "$tag")"
+  if [[ -n "$remote_tag_commit" && "$remote_tag_commit" != "$head" ]]; then
+    echo "Release tag '$tag' already exists on origin at $remote_tag_commit, not HEAD $head. Choose a new version." >&2
+    return 1
+  fi
+
+  if git -C "$repo_root" show-ref --verify --quiet "refs/tags/$tag"; then
+    local tag_commit
+    tag_commit="$(git -C "$repo_root" rev-parse "$tag^{commit}")"
+    if [[ "$tag_commit" != "$head" ]]; then
+      echo "Release tag '$tag' already points to $tag_commit, not HEAD $head." >&2
+      return 1
+    fi
+  fi
+}
+
 publish_registry_host() {
   local image_repository=$1 configured first_segment
   configured="$(publish_get_env_value CONTAINER_REGISTRY true || true)"
@@ -139,13 +232,20 @@ publish_ensure_git_tag() {
 
   if [[ -z "$existing" ]]; then
     echo "Creating annotated git tag '$tag'..."
-    git -C "$repo_root" tag -a "$tag" -m "Release $tag"
+    git -C "$repo_root" tag -a -m "Release $tag" -- "$tag"
   else
-    echo "Git tag '$tag' already exists locally."
+    local tag_commit head_commit
+    tag_commit="$(git -C "$repo_root" rev-parse "$tag^{commit}")"
+    head_commit="$(git -C "$repo_root" rev-parse 'HEAD^{commit}')"
+    if [[ "$tag_commit" != "$head_commit" ]]; then
+      echo "Git tag '$tag' points to $tag_commit, not HEAD $head_commit." >&2
+      return 1
+    fi
+    echo "Git tag '$tag' already exists locally and points to HEAD."
   fi
 
   if [[ "$push_tag" == true ]]; then
     echo "Pushing git tag '$tag' to origin..."
-    git -C "$repo_root" push origin "$tag"
+    git -C "$repo_root" push origin "refs/tags/$tag"
   fi
 }

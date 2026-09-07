@@ -11,6 +11,8 @@ This repository contains a full-stack nutrition planning and tracking applicatio
 
 ## Worktrees & Environment
 - The default branch (`main`) must remain in the primary clone.
+- `development` is the integration branch. Create every feature, bugfix, refactor, and housekeeping branch from the latest `origin/development`, and merge working branches back into `development` through pull requests.
+- Release by merging `development` into `main` with a merge commit. Do not squash, rebase, reset, force-push, or otherwise rewrite `main` during release promotion. Tag and publish only the resulting clean, synchronized `main` commit, then fast-forward `development` to that release commit before starting new work.
 - Feature branches belong in sibling worktrees named `nutrition-<sanitized-branch>`.
 - Before making changes, run `pwsh ./scripts/repo/check.ps1` (or `./scripts/repo/check.sh`) to fetch, prune, and audit worktrees.
 - Use `pwsh ./scripts/switch-worktree-branch.ps1 <branch>` to create or jump to the correct worktree (PowerShell is available cross-platform).

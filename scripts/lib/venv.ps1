@@ -7,6 +7,7 @@ function Ensure-Venv {
   try {
     if (-not $env:VIRTUAL_ENV) {
       Out-Step "Activating virtual environment..."
+      $global:LASTEXITCODE = 0
       . $ActivatorPath *> $activationLog 2>&1
       if ($LASTEXITCODE -ne 0) {
         if (Test-Path $activationLog) { Get-Content $activationLog | Write-Host }

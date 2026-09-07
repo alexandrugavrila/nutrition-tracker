@@ -14,7 +14,7 @@ const compat = new FlatCompat({
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**"],
+    ignores: ["dist/**", "node_modules/**", "playwright-report/**", "test-results/**"],
   },
   ...compat.config({
     env: {
