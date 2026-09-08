@@ -564,7 +564,9 @@ Additional tooling:
 
 ## Continuous Integration (GitHub Actions)
 
-The CI workflow contains **backend**, **frontend**, and **production-smoke** jobs. A separate **branch-policy** workflow enforces the integration and release topology.
+The CI workflow contains **backend**, **frontend**, **e2e**, and **production-smoke** jobs. A separate **branch-policy** workflow enforces the integration and release topology. The E2E job runs the existing API and Playwright suites against an isolated Docker test stack on a disposable runner checkout and always attempts teardown. It uses a temporary local branch to satisfy the branch-aware test helpers; that branch is never pushed.
+
+The backend job audits `Backend/requirements.txt` with `pip-audit` in a separate tool environment, including resolved transitive dependencies. Known vulnerabilities fail CI. The frontend job audits its committed npm lockfile. Run both audits when updating dependencies; passing application tests alone is not a security audit. Keep fixed release tags immutable and publish dependency fixes under a new release tag.
 
 ### Branch-policy job
 
