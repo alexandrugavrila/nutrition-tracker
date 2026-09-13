@@ -7,6 +7,6 @@ python-multipart==0.0.31
 uvicorn[standard]==0.29.0
 alembic==1.16.4
 sqlmodel>=0.0.21
-pytest==9.0.3
+pytest==9.1.1
 httpx>=0.24,<1.0
 gunicorn==22.0.0
