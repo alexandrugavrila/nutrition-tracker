@@ -46,6 +46,11 @@ jobs:
         run: |
           source scripts/env/activate-venv.sh
           pip install pytest
+      - name: Backend dependency audit
+        run: |
+          python -m venv /tmp/nutrition-audit
+          /tmp/nutrition-audit/bin/python -m pip install pip-audit
+          /tmp/nutrition-audit/bin/python -m pip_audit -r Backend/requirements.txt
       - name: Check migration drift
         run: |
           source scripts/env/activate-venv.sh
@@ -117,6 +122,33 @@ jobs:
       - name: Production build
         working-directory: Frontend
         run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: nutrition-housekeeping-ci-validation
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: nutrition-housekeeping-ci-validation
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Prepare isolated validation checkout
+        run: |
+          git switch -c housekeeping/ci-validation
+          source scripts/env/activate-venv.sh
+          npm --prefix Frontend exec -- playwright install --with-deps chromium
+      - name: API and browser end-to-end tests
+        run: bash scripts/tests/run-e2e-tests.sh
+      - name: Teardown test stack
+        if: always()
+        run: bash scripts/docker/compose.sh down type -test
 
   production-smoke:
     runs-on: ubuntu-latest
