@@ -140,9 +140,15 @@ def main():
                 },
             }
         }
-        config['services']['frontend'] = {'image': frontend}
+        # nginx resolves upstream names at startup; start dependencies first.
+        config['services']['frontend'] = {
+            'image': frontend,
+            'depends_on': {'backend': {'condition': 'service_started'}},
+        }
         config['services']['edge'] = {
             'image': 'nginx:stable-alpine',
+            'depends_on': {service: {'condition': 'service_started'}
+                           for service in ('backend', 'frontend')},
             'ports': [f'127.0.0.1:{port}:443'],
             'volumes': [
                 str(folder / 'nginx.conf') + ':/etc/nginx/conf.d/default.conf:ro',
@@ -268,9 +274,15 @@ def main():
                     ) as response:
                         assert response.status == 200
                     break
-                except (OSError, AssertionError):
+                except (OSError, AssertionError) as error:
+                    last_readiness_error = repr(error)
                     time.sleep(1)
             else:
+                print('Last readiness error:', last_readiness_error, flush=True)
+                subprocess.run(compose + ['ps', '-a'], cwd=ROOT, env=env, check=False)
+                subprocess.run(compose + ['logs', '--no-color', '--tail', '100',
+                                          'edge', 'backend', 'frontend'],
+                               cwd=ROOT, env=env, check=False)
                 raise RuntimeError('HTTPS production stack did not become ready')
             env.update(
                 RELEASE_HTTPS_ORIGIN=origin,
