@@ -1042,3 +1042,9 @@ Keep `ENVIRONMENT=production` and `DB_AUTO_CREATE=false`; restrict edge access t
 the intended network. HTTP traffic is unencrypted. Record HTTPS release checks
 as deferred for this owner-selected deployment, not passed. Existing HTTPS
 rehearsals remain useful regression coverage and are not removed.
+
+
+The disposable `testsupport.run_release_cutover` stack orders nginx startup after
+its backend/frontend dependencies so upstream DNS names exist at startup. Failed
+readiness checks print the last connection error and bounded service logs before
+cleanup. The production Compose file already orders services using health checks.
