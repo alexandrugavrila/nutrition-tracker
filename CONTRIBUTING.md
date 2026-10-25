@@ -1048,3 +1048,14 @@ The disposable `testsupport.run_release_cutover` stack orders nginx startup afte
 its backend/frontend dependencies so upstream DNS names exist at startup. Failed
 readiness checks print the last connection error and bounded service logs before
 cleanup. The production Compose file already orders services using health checks.
+
+The release runner accepts `--transport http` for the explicitly selected private
+HTTP deployment. HTTPS remains the default. Both modes use production settings,
+isolated data and loopback-only ports. The HTTP mode explicitly enables insecure
+transport and checks the named session cookie is HttpOnly/SameSite=Lax without
+Secure; HTTPS requires Secure. Both reject an untrusted-origin logout and verify
+the session survives that rejection. CI runs both modes in `release-cutover` and
+retains separate logs. Append the same transport flag to historical or published
+digest rehearsals; this does not validate router rules or deploy a permanent site.
+The existing `release_https_smoke.cjs` filename and `RELEASE_HTTPS_ORIGIN` variable
+remain compatible; `RELEASE_TRANSPORT=http` is mandatory for an HTTP origin.

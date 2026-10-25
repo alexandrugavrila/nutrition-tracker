@@ -55,6 +55,8 @@ def main():
     )
     parser.add_argument('--backend-image', help='Existing published backend digest; skips builds')
     parser.add_argument('--frontend-image', help='Existing published frontend digest; skips builds')
+    parser.add_argument('--transport', choices=('https', 'http'), default='https',
+                        help='Explicit private HTTP rehearsal or default HTTPS regression')
     args = parser.parse_args()
     validate_images(parser, args.backend_image, args.frontend_image)
     if args.repair_known_legacy_override and (
@@ -69,7 +71,7 @@ def main():
     with socket.socket() as reservation:
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
-    origin = f'https://localhost:{port}'
+    origin = f'{args.transport}://localhost:{port}'
     env = dict(os.environ)
     for key in (
         'COMPOSE_PROFILES',
@@ -85,30 +87,35 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix=project) as directory:
         folder = Path(directory)
-        openssl = shutil.which('openssl') or 'C:/Program Files/Git/usr/bin/openssl.exe'
-        run(
-            [
-                openssl,
-                'req',
-                '-x509',
-                '-newkey',
-                'rsa:2048',
-                '-nodes',
-                '-days',
-                '1',
-                '-keyout',
-                str(folder / 'key.pem'),
-                '-out',
-                str(folder / 'cert.pem'),
-                '-subj',
-                '/CN=localhost',
-                '-addext',
-                'subjectAltName=DNS:localhost',
-            ]
-        )
-        (folder / 'nginx.conf').write_text(
-            'server { listen 443 ssl; ssl_certificate /cert/cert.pem; ssl_certificate_key /cert/key.pem; location /api/ { proxy_pass http://backend:8000; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; } location / { proxy_pass http://frontend:80; } }'
-        )
+        if args.transport == 'https':
+            openssl = shutil.which('openssl') or 'C:/Program Files/Git/usr/bin/openssl.exe'
+            run(
+                [
+                    openssl,
+                    'req',
+                    '-x509',
+                    '-newkey',
+                    'rsa:2048',
+                    '-nodes',
+                    '-days',
+                    '1',
+                    '-keyout',
+                    str(folder / 'key.pem'),
+                    '-out',
+                    str(folder / 'cert.pem'),
+                    '-subj',
+                    '/CN=localhost',
+                    '-addext',
+                    'subjectAltName=DNS:localhost',
+                ]
+            )
+            (folder / 'nginx.conf').write_text(
+                'server { listen 443 ssl; ssl_certificate /cert/cert.pem; ssl_certificate_key /cert/key.pem; location /api/ { proxy_pass http://backend:8000; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto https; } location / { proxy_pass http://frontend:80; } }'
+            )
+        if args.transport == 'http':
+            (folder / 'nginx.conf').write_text(
+                'server { listen 80; location /api/ { proxy_pass http://backend:8000; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto http; } location / { proxy_pass http://frontend:80; } }'
+            )
         config = {
             'services': {
                 'db': {
@@ -132,6 +139,8 @@ def main():
                         'ENVIRONMENT': 'production',
                         'DB_AUTO_CREATE': 'false',
                         'CORS_ALLOW_ORIGINS': origin,
+                        'SESSION_SECURE_COOKIE': str(args.transport == 'https').lower(),
+                        'ALLOW_INSECURE_HTTP': str(args.transport == 'http').lower(),
                     },
                 },
                 **{
@@ -149,7 +158,7 @@ def main():
             'image': 'nginx:stable-alpine',
             'depends_on': {service: {'condition': 'service_started'}
                            for service in ('backend', 'frontend')},
-            'ports': [f'127.0.0.1:{port}:443'],
+            'ports': [f'127.0.0.1:{port}:{443 if args.transport == "https" else 80}'],
             'volumes': [
                 str(folder / 'nginx.conf') + ':/etc/nginx/conf.d/default.conf:ro',
                 str(folder) + ':/cert:ro',
@@ -266,7 +275,8 @@ def main():
                 input='test-only-password\n',
             )
             c.dc('up', '-d', 'backend', 'frontend', 'edge')
-            tls = ssl.create_default_context(cafile=str(folder / 'cert.pem'))
+            tls = (ssl.create_default_context(cafile=str(folder / 'cert.pem'))
+                   if args.transport == 'https' else None)
             for attempt in range(90):
                 try:
                     with urllib.request.urlopen(
@@ -283,10 +293,11 @@ def main():
                 subprocess.run(compose + ['logs', '--no-color', '--tail', '100',
                                           'edge', 'backend', 'frontend'],
                                cwd=ROOT, env=env, check=False)
-                raise RuntimeError('HTTPS production stack did not become ready')
+                raise RuntimeError(f'{args.transport.upper()} production stack did not become ready')
             env.update(
                 RELEASE_HTTPS_ORIGIN=origin,
-                RELEASE_LOCAL_CERT='1',
+                RELEASE_TRANSPORT=args.transport,
+                RELEASE_LOCAL_CERT='1' if args.transport == 'https' else '0',
                 RELEASE_USER_A='owner@example.invalid',
                 RELEASE_USER_B='other@example.invalid',
                 RELEASE_PASSWORD='test-only-password',
@@ -303,6 +314,7 @@ def main():
                         'frontend_reference': frontend,
                         'image_mode': 'published-digests' if args.backend_image else 'local-build',
                         'restore_verified': True,
+                        'transport': args.transport,
                         'reviewed_repair': (
                             'Plan 4/item 0: removed stale ingredient 117 override'
                             if args.repair_known_legacy_override
