@@ -30,7 +30,7 @@ import {
   createIngredientLookup,
   macrosForFood,
   macrosForIngredientPortion,
-  ZERO_MACROS,
+  UNKNOWN_MACROS,
   findIngredientInLookup,
   type FoodRead,
 } from "@/utils/nutrition";
@@ -135,14 +135,14 @@ function FoodTable({ onFoodDoubleClick, onFoodCtrlClick }: FoodTableProps) {
 
   const calculateIngredientMacros = useCallback(
     (ingredient) => {
-      if (!ingredient) return { ...ZERO_MACROS };
+      if (!ingredient) return { ...UNKNOWN_MACROS };
       const ingredientId = ingredient.ingredient_id;
       if (ingredientId === null || ingredientId === undefined) {
-        return { ...ZERO_MACROS };
+        return { ...UNKNOWN_MACROS };
       }
       const dataIngredient = findIngredientInLookup(ingredientLookup, ingredientId);
       if (!dataIngredient) {
-        return { ...ZERO_MACROS };
+        return { ...UNKNOWN_MACROS };
       }
       return macrosForIngredientPortion({
         ingredient: dataIngredient,

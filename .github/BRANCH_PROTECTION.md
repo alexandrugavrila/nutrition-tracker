@@ -12,7 +12,7 @@ Apply these repository settings after `.github/workflows/branch-policy.yml` is p
 - Require a pull request before merging.
 - Require approvals and resolved review conversations.
 - Require branches to be up to date before merging.
-- Require status checks: `branch-policy`, `backend`, `frontend`, and `production-smoke`.
+- Require status checks: `branch-policy`, `backend`, `frontend`, `production-smoke`, `authenticated-e2e`, and `release-cutover`.
 - Block branch deletion and non-fast-forward/force-push updates.
 - Do not allow bypass for ordinary release work.
 
@@ -23,7 +23,7 @@ The branch-policy check permits only `development` as the source of a pull reque
 - Require a pull request before merging.
 - Require approvals and resolved review conversations.
 - Require branches to be up to date before merging.
-- Require status checks: `branch-policy`, `backend`, `frontend`, and `production-smoke`.
+- Require status checks: `branch-policy`, `backend`, `frontend`, `production-smoke`, `authenticated-e2e`, and `release-cutover`.
 - Block branch deletion and non-fast-forward/force-push updates.
 - Add only the designated release manager or release-automation GitHub App to the bypass list. Use that bypass solely to fast-forward `development` to the just-tagged `main` release commit while the release freeze is active.
 
@@ -43,7 +43,7 @@ The workflow additionally requires `vMAJOR.MINOR.PATCH` with an optional Docker-
 
 1. Merge the workflow and policy files into `development`.
 2. Promote `development` to `main` using a merge commit.
-3. Confirm all four named checks appear on a test pull request.
+3. Confirm all six named checks appear on a test pull request.
 4. Enable and enforce the `development` ruleset.
 5. Enable and enforce the `main` ruleset.
 6. Enable the release-tag ruleset and verify that a non-release actor cannot create, move, or delete a test `v*` tag.

@@ -1,3 +1,4 @@
+import { useAccountFetch } from "@/contexts/AccountScope";
 // @ts-check
 import React, { useEffect, useCallback, useRef } from "react";
 import { Button, Collapse, Paper, Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
@@ -58,6 +59,7 @@ const reducer = (state, action) => {
 };
 
 function FoodForm({ foodToEditData }) {
+  const fetch = useAccountFetch();
   //#region States
   const { setFoodsNeedsRefetch, startRequest, endRequest } = useData();
   const [state, dispatch] = useSessionStorageReducer(reducer, createInitialState, "food-form-state-v1");
@@ -91,7 +93,7 @@ function FoodForm({ foodToEditData }) {
     const url = isEditMode ? `/api/foods/${foodToEdit.id}` : "/api/foods/";
     const method = isEditMode ? "PUT" : "POST";
 
-    handleFetchRequest(url, method, /** @type {FoodRequest} */ (toDatabaseFood))
+    handleFetchRequest(url, method, /** @type {FoodRequest} */ (toDatabaseFood), fetch)
       .then(() => {
         setFoodsNeedsRefetch(true);
         if (!isEditMode) {

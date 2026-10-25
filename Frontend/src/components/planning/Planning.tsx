@@ -36,6 +36,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useData } from "@/contexts/DataContext";
 import { formatCellNumber } from "@/utils/utils";
 import {
+  addMacroTotals,
+  scaleMacroTotals,
+  scaleNutrient,
+  UNKNOWN_MACROS,
+  ZERO_TARGETS,
   createIngredientLookup,
   macrosForFood,
   macrosForIngredientPortion,
@@ -50,7 +55,7 @@ import DecimalInput from "@/components/common/DecimalInput";
 import useHoverable from "@/hooks/useHoverable";
 import { useSessionStorageState } from "@/hooks/useSessionStorageState";
 import type { PlanRead } from "@/utils/planApi";
-import { createPlan, updatePlan } from "@/utils/planApi";
+import { usePlanApi } from "@/utils/planApi";
 import type {
   FoodOverride,
   FoodPlanItem,
@@ -143,6 +148,7 @@ const NameWithEdit: React.FC<NameWithEditProps> = ({ name, onEdit }) => {
 };
 
 function Planning() {
+  const { createPlan, updatePlan } = usePlanApi();
   const { foods, ingredients, fridgeInventory } = useData();
   const navigate = useNavigate();
   const location = useLocation();
@@ -151,7 +157,7 @@ function Planning() {
   const [days, setDays] = useSessionStorageState<number>("planning-days", 1);
   const [daysError, setDaysError] = useState(false);
   const [targetMacros, setTargetMacros] = useSessionStorageState<PlanPayload["targetMacros"]>("planning-target-macros", () => ({
-    ...ZERO_MACROS,
+    ...ZERO_TARGETS,
   }));
   const macroKeys = useMemo(() => Object.keys(targetMacros) as MacroKey[], [targetMacros]);
   const [plan, setPlan] = useSessionStorageState<PlanItem[]>("planning-plan", () => []); // FoodPlanItem or IngredientPlanItem
@@ -706,7 +712,7 @@ function Planning() {
       }
       const dataIngredient = findIngredientInLookup(ingredientLookup, ingredientId);
       if (!dataIngredient) {
-        return { ...ZERO_MACROS };
+        return { ...UNKNOWN_MACROS };
       }
       return macrosForIngredientPortion({
         ingredient: dataIngredient,
@@ -731,11 +737,11 @@ function Planning() {
         );
         const macros = calculateFoodMacros(food, item.overrides);
         return {
-          calories: macros.calories * item.portions,
-          protein: macros.protein * item.portions,
-          fat: macros.fat * item.portions,
-          carbs: macros.carbs * item.portions,
-          fiber: macros.fiber * item.portions,
+          calories: scaleNutrient(macros.calories, item.portions),
+          protein: scaleNutrient(macros.protein, item.portions),
+          fat: scaleNutrient(macros.fat, item.portions),
+          carbs: scaleNutrient(macros.carbs, item.portions),
+          fiber: scaleNutrient(macros.fiber, item.portions),
         };
       }
       const perPortion = calculateIngredientMacros({
@@ -744,11 +750,11 @@ function Planning() {
         unit_quantity: item.amount,
       });
       return {
-        calories: perPortion.calories * item.portions,
-        protein: perPortion.protein * item.portions,
-        fat: perPortion.fat * item.portions,
-        carbs: perPortion.carbs * item.portions,
-        fiber: perPortion.fiber * item.portions,
+        calories: scaleNutrient(perPortion.calories, item.portions),
+        protein: scaleNutrient(perPortion.protein, item.portions),
+        fat: scaleNutrient(perPortion.fat, item.portions),
+        carbs: scaleNutrient(perPortion.carbs, item.portions),
+        fiber: scaleNutrient(perPortion.fiber, item.portions),
       };
     },
     [foods, calculateFoodMacros, calculateIngredientMacros]
@@ -758,59 +764,27 @@ function Planning() {
     return plan.reduce(
       (totals, item) => {
         const macros = calculateItemMacros(item);
-        totals.calories += macros.calories;
-        totals.protein += macros.protein;
-        totals.fat += macros.fat;
-        totals.carbs += macros.carbs;
-        totals.fiber += macros.fiber;
-        return totals;
+        return addMacroTotals(totals, macros);
       },
       { ...ZERO_MACROS }
     );
   }, [plan, calculateItemMacros]);
 
-  const fridgeTotalMacros = useMemo(() => {
-    return fridgeInventory.reduce(
-      (totals, item) => {
-        const remaining = Number.isFinite(item.remaining_portions)
-          ? Math.max(0, item.remaining_portions)
-          : 0;
-        totals.calories += item.per_portion_calories * remaining;
-        totals.protein += item.per_portion_protein * remaining;
-        totals.fat += item.per_portion_fat * remaining;
-        totals.carbs += item.per_portion_carbohydrates * remaining;
-        totals.fiber += item.per_portion_fiber * remaining;
-        return totals;
-      },
-      { ...ZERO_MACROS },
-    );
-  }, [fridgeInventory]);
+  const fridgeTotalMacros = useMemo(() => fridgeInventory.reduce((totals, item) =>
+    addMacroTotals(totals, scaleMacroTotals({
+      calories: item.per_portion_calories,
+      protein: item.per_portion_protein,
+      fat: item.per_portion_fat,
+      carbs: item.per_portion_carbohydrates,
+      fiber: item.per_portion_fiber,
+    }, Math.max(0, item.remaining_portions))), { ...ZERO_MACROS }), [fridgeInventory]);
 
-  const overallTotalMacros = useMemo(() => {
-    if (!includeFridge) {
-      return planTotalMacros;
-    }
-    return {
-      calories: planTotalMacros.calories + fridgeTotalMacros.calories,
-      protein: planTotalMacros.protein + fridgeTotalMacros.protein,
-      fat: planTotalMacros.fat + fridgeTotalMacros.fat,
-      carbs: planTotalMacros.carbs + fridgeTotalMacros.carbs,
-      fiber: planTotalMacros.fiber + fridgeTotalMacros.fiber,
-    };
-  }, [includeFridge, planTotalMacros, fridgeTotalMacros]);
+  const overallTotalMacros = useMemo(() => includeFridge
+    ? addMacroTotals(planTotalMacros, fridgeTotalMacros) : planTotalMacros,
+    [includeFridge, planTotalMacros, fridgeTotalMacros]);
 
-  const perDayMacros = useMemo(() => {
-    if (days <= 0) {
-      return { ...ZERO_MACROS };
-    }
-    return {
-      calories: overallTotalMacros.calories / days,
-      protein: overallTotalMacros.protein / days,
-      fat: overallTotalMacros.fat / days,
-      carbs: overallTotalMacros.carbs / days,
-      fiber: overallTotalMacros.fiber / days,
-    };
-  }, [overallTotalMacros, days]);
+  const perDayMacros = useMemo(() => scaleMacroTotals(overallTotalMacros, days > 0 ? 1 / days : 0),
+    [overallTotalMacros, days]);
 
   const handleDaysChange = (value: number) => {
     if (!value || value < 1) {
@@ -887,7 +861,7 @@ function Planning() {
     }
     setDays(1);
     setDaysError(false);
-    setTargetMacros({ ...ZERO_MACROS });
+    setTargetMacros({ ...ZERO_TARGETS });
     setPlan([]);
     setOpen({});
     setActivePlan({ id: null, label: null, updatedAt: null });

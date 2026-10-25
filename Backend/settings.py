@@ -82,6 +82,11 @@ class Settings:
     # Runtime environment name (e.g. development/test/production).
     environment: str
 
+    # Auth/session settings.
+    session_cookie_name: str
+    session_ttl_days: int
+    session_secure_cookie: bool
+
     @staticmethod
     def _is_production(environment: str) -> bool:
         return _is_production_environment(environment)
@@ -105,10 +110,6 @@ class Settings:
                 "SQLite is not supported when ENVIRONMENT is production. Use a managed PostgreSQL DATABASE_URL."
             )
 
-        if not usda_api_key:
-            raise RuntimeError(
-                "USDA_API_KEY is required when ENVIRONMENT is production."
-            )
 
     @staticmethod
     def load() -> "Settings":
@@ -145,6 +146,22 @@ class Settings:
                 RuntimeWarning,
             )
 
+        session_cookie_name = os.getenv("SESSION_COOKIE_NAME", "nutrition_session")
+        session_ttl_days = int(os.getenv("SESSION_TTL_DAYS", "14"))
+        session_secure_cookie = _to_bool(
+            os.getenv("SESSION_SECURE_COOKIE"),
+            default=Settings._is_production(environment),
+        )
+
+        if Settings._is_production(environment) and not session_secure_cookie:
+            if not _to_bool(os.getenv("ALLOW_INSECURE_HTTP"), default=False):
+                raise RuntimeError("Production requires secure session cookies over HTTPS. "
+                                   "Private HTTP deployments must explicitly set ALLOW_INSECURE_HTTP=true.")
+            if not origins or any(not origin.startswith("http://") or "*" in origin
+                                  or not urlparse(origin).hostname for origin in origins):
+                raise RuntimeError("Insecure HTTP requires explicit http:// browser origins.")
+            warnings.warn("Private HTTP deployment: session traffic is unencrypted.", RuntimeWarning)
+
         Settings._validate_required_production_secrets(
             db_url=db_url,
             usda_api_key=usda_api_key,
@@ -157,6 +174,9 @@ class Settings:
             allow_origins=origins,
             usda_api_key=usda_api_key,
             environment=environment,
+            session_cookie_name=session_cookie_name,
+            session_ttl_days=session_ttl_days,
+            session_secure_cookie=session_secure_cookie,
         )
 
 

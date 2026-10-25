@@ -159,7 +159,8 @@ describe("Logging component", () => {
     expect(screen.getByText(/Daily Log/i)).toBeInTheDocument();
   });
 
-  it("logs consumption and records totals for the selected day", async () => {
+  it.each([6, 0, null])("logs consumption and preserves fiber %s in daily totals", async (fiber: number | null) => {
+    (useData as unknown as Mock).mockReturnValue(createDataContextValue({ fridgeInventory: [{ ...fridgeItem, per_portion_fiber: fiber }] }));
     const logResponse = {
       id: 42,
       user_id: fridgeItem.user_id,
@@ -172,13 +173,12 @@ describe("Logging component", () => {
       protein: 15,
       carbohydrates: 22.5,
       fat: 7.5,
-      fiber: 9,
+      fiber: fiber === null ? null : fiber * 1.5,
       created_at: `${today}T12:00:00Z`,
     };
 
     logHandler = vi.fn(async (options = {}) => {
       expect(options?.body).toMatchObject({
-        user_id: fridgeItem.user_id,
         log_date: today,
         stored_food_id: fridgeItem.id,
         portions_consumed: 1.5,
@@ -186,7 +186,7 @@ describe("Logging component", () => {
         protein: 15,
         carbohydrates: 22.5,
         fat: 7.5,
-        fiber: 9,
+        fiber: fiber === null ? null : fiber * 1.5,
       });
       return { data: logResponse };
     });
@@ -235,7 +235,7 @@ describe("Logging component", () => {
     ).toHaveTextContent("7.5");
     expect(
       within(totalSummary).getByLabelText(/Total fiber/i),
-    ).toHaveTextContent("9");
+    ).toHaveTextContent(fiber === null ? "Unavailable" : String(fiber * 1.5));
   });
 
   it("logs a standalone ingredient entry", async () => {
@@ -272,7 +272,6 @@ describe("Logging component", () => {
 
     logHandler = vi.fn(async (options = {}) => {
       expect(options?.body).toMatchObject({
-        user_id: "demo-user",
         log_date: today,
         ingredient_id: standaloneIngredient.id,
         stored_food_id: null,
@@ -384,7 +383,6 @@ describe("Logging component", () => {
     logHandler = vi.fn(async (options = {}) => {
       const payload = options?.body as Record<string, unknown>;
       expect(payload).toMatchObject({
-        user_id: "demo-user",
         log_date: today,
         food_id: standaloneFood.id,
         stored_food_id: null,

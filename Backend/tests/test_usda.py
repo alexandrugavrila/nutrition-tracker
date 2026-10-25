@@ -70,7 +70,7 @@ def test_trim_food_payload_includes_only_base_gram_unit_when_no_usda_measures_ex
         }
     )
 
-    assert payload["units"] == [{"name": "1 g", "grams": 1.0, "is_default": True}]
+    assert payload["units"] == [{"name": "g", "grams": 1.0, "is_default": True}]
 
 
 def test_trim_food_payload_marks_branded_gram_serving_as_default_unit() -> None:
@@ -87,7 +87,7 @@ def test_trim_food_payload_marks_branded_gram_serving_as_default_unit() -> None:
     )
 
     assert payload["units"] == [
-        {"name": "1 g", "grams": 1.0, "is_default": False},
+        {"name": "g", "grams": 1.0, "is_default": False},
         {"name": "1 bar", "grams": 55.0, "is_default": True},
     ]
 
@@ -107,6 +107,11 @@ def test_trim_food_payload_includes_multiple_gram_backed_usda_units() -> None:
                     "gramWeight": 109,
                 },
                 {
+                    "amount": 1,
+                    "measureUnit": {"name": "RACC", "abbreviation": "RACC"},
+                    "gramWeight": 140,
+                },
+                {
                     "portionDescription": "1 tbsp",
                     "gramWeight": 8.5,
                 },
@@ -123,7 +128,7 @@ def test_trim_food_payload_includes_multiple_gram_backed_usda_units() -> None:
     )
 
     assert payload["units"] == [
-        {"name": "1 g", "grams": 1.0, "is_default": True},
+        {"name": "g", "grams": 1.0, "is_default": True},
         {"name": "1 cup sliced", "grams": 109.0, "is_default": False},
         {"name": "1 tbsp", "grams": 8.5, "is_default": False},
         {"name": "2 piece rings", "grams": 35.0, "is_default": False},
@@ -155,7 +160,7 @@ def test_trim_food_payload_deduplicates_units_and_omits_entries_without_grams() 
     )
 
     assert payload["units"] == [
-        {"name": "1 g", "grams": 1.0, "is_default": False},
+        {"name": "g", "grams": 1.0, "is_default": False},
         {"name": "1/4 cup", "grams": 28.0, "is_default": True},
         {"name": "1 packet", "grams": 30.0, "is_default": False},
     ]
@@ -178,7 +183,7 @@ def test_trim_food_payload_marks_branded_liquids_as_not_normalizable() -> None:
     )
 
     assert payload["nutrition"] is None
-    assert payload["units"] == [{"name": "1 g", "grams": 1.0, "is_default": True}]
+    assert payload["units"] == [{"name": "g", "grams": 1.0, "is_default": True}]
     assert payload["normalization"] == {
         "data_type": "Branded",
         "source_basis": "per_100ml",
@@ -248,6 +253,43 @@ def test_trim_food_payload_ignores_non_kilocalorie_energy_variants() -> None:
     }
 
 
+def test_trim_food_payload_uses_newer_foundation_macro_variants() -> None:
+    payload = _trim_food_payload(
+        {
+            "fdcId": 557,
+            "description": "Oats sample",
+            "dataType": "Foundation",
+            "foodNutrients": [
+                {
+                    "nutrientName": "Total fat (NLEA)",
+                    "value": 5.89,
+                    "nutrient": {"id": 1085, "number": "1085", "unitName": "g"},
+                },
+                {
+                    "nutrientName": "Carbohydrate, by summation",
+                    "value": 68.7,
+                    "nutrient": {"id": 1050, "number": "1050", "unitName": "g"},
+                },
+                {
+                    "nutrientName": "Total dietary fiber (AOAC 2011.25)",
+                    "value": 10.4,
+                    "nutrient": {"id": 2033, "number": "2033", "unitName": "g"},
+                },
+            ],
+        }
+    )
+
+    assert payload["nutrition"] == pytest.approx(
+        {
+            "calories": None,
+            "protein": None,
+            "fat": 0.0589,
+            "carbohydrates": 0.687,
+            "fiber": 0.104,
+        }
+    )
+
+
 class _MockUsdaResponse:
     def __init__(self, payload):
         self._payload = payload
@@ -274,13 +316,13 @@ class _MockAsyncClient:
         return _MockUsdaResponse({"foods": []})
 
 
-def test_search_foods_defaults_to_foundation_data_type(client, monkeypatch) -> None:
+def test_search_foods_defaults_to_foundation_data_type(user_a_client, monkeypatch) -> None:
     mock_client = _MockAsyncClient()
 
     monkeypatch.setattr(usda_routes, "settings", SimpleNamespace(usda_api_key="test-key"))
     monkeypatch.setattr(usda_routes.httpx, "AsyncClient", lambda *args, **kwargs: mock_client)
 
-    response = client.get("/api/usda/search", params={"query": "banana"})
+    response = user_a_client.get("/api/usda/search", params={"query": "banana"})
 
     assert response.status_code == 200
     assert mock_client.calls == [
@@ -296,13 +338,13 @@ def test_search_foods_defaults_to_foundation_data_type(client, monkeypatch) -> N
     ]
 
 
-def test_search_foods_forwards_single_selected_data_type(client, monkeypatch) -> None:
+def test_search_foods_forwards_single_selected_data_type(user_a_client, monkeypatch) -> None:
     mock_client = _MockAsyncClient()
 
     monkeypatch.setattr(usda_routes, "settings", SimpleNamespace(usda_api_key="test-key"))
     monkeypatch.setattr(usda_routes.httpx, "AsyncClient", lambda *args, **kwargs: mock_client)
 
-    response = client.get(
+    response = user_a_client.get(
         "/api/usda/search",
         params=[("query", "banana"), ("data_types", "Branded")],
     )
@@ -321,13 +363,13 @@ def test_search_foods_forwards_single_selected_data_type(client, monkeypatch) ->
     ]
 
 
-def test_search_foods_forwards_multiple_selected_data_types(client, monkeypatch) -> None:
+def test_search_foods_forwards_multiple_selected_data_types(user_a_client, monkeypatch) -> None:
     mock_client = _MockAsyncClient()
 
     monkeypatch.setattr(usda_routes, "settings", SimpleNamespace(usda_api_key="test-key"))
     monkeypatch.setattr(usda_routes.httpx, "AsyncClient", lambda *args, **kwargs: mock_client)
 
-    response = client.get(
+    response = user_a_client.get(
         "/api/usda/search",
         params=[
             ("query", "banana"),
@@ -351,8 +393,8 @@ def test_search_foods_forwards_multiple_selected_data_types(client, monkeypatch)
     ]
 
 
-def test_search_foods_rejects_unknown_data_types(client) -> None:
-    response = client.get(
+def test_search_foods_rejects_unknown_data_types(user_a_client) -> None:
+    response = user_a_client.get(
         "/api/usda/search",
         params=[("query", "banana"), ("data_types", "Totally Unknown")],
     )

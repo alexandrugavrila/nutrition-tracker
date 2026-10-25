@@ -1,7 +1,7 @@
 from typing import List, Optional, TYPE_CHECKING
 
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, String
+from sqlalchemy import Boolean, CheckConstraint, Column, ForeignKey, String, UniqueConstraint
 
 from .ingredient_unit import IngredientUnit
 from .ingredient_source import IngredientSource
@@ -19,9 +19,24 @@ class Ingredient(SQLModel, table=True):
     """Core ingredient information."""
 
     __tablename__ = "ingredients"
+    __table_args__ = (
+        CheckConstraint("is_shared OR user_id IS NOT NULL", name="ck_ingredients_personal_has_owner"),
+        CheckConstraint("NOT is_shared OR user_id IS NULL", name="ck_ingredients_shared_has_no_owner"),
+        UniqueConstraint("user_id", "name", name="uq_ingredients_user_id_name"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(sa_column=Column(String(100), unique=True, nullable=False))
+    user_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(
+            String(36),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    is_shared: bool = Field(default=False, sa_column=Column(Boolean, nullable=False, server_default="false"))
+    name: str = Field(sa_column=Column(String(255), nullable=False))
     nutrition: Optional[Nutrition] = Relationship(
         back_populates="ingredient",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},

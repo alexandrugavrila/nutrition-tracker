@@ -22,7 +22,7 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { useNavigate } from "react-router-dom";
 
 import type { PlanRead } from "@/utils/planApi";
-import { createPlan, deletePlan, fetchPlans, updatePlan } from "@/utils/planApi";
+import { usePlanApi } from "@/utils/planApi";
 import type { PlanPayload } from "@/utils/planningTypes";
 
 const formatTimestamp = (value: string | undefined) => {
@@ -33,6 +33,7 @@ const formatTimestamp = (value: string | undefined) => {
 };
 
 function PlanManager() {
+  const { createPlan, deletePlan, fetchPlans, updatePlan } = usePlanApi();
   const [plans, setPlans] = useState<PlanRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

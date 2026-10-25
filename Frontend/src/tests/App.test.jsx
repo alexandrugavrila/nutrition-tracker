@@ -3,8 +3,6 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, test, vi } from "vitest";
 
-import App from "../App";
-
 vi.mock("@/components/data/DataPage", () => ({
   __esModule: true,
   default: () => <div>DataPageComponent</div>,
@@ -31,20 +29,23 @@ vi.mock("@/components/logging/Logging", () => ({
 }));
 
 beforeEach(() => {
+  vi.resetModules();
   window.history.pushState({}, "", "/");
 });
 
 test("renders the data page on the default route", async () => {
+  const { default: App } = await import("../App");
   render(<App />);
 
-  expect(await screen.findByText("DataPageComponent")).toBeVisible();
+  expect(await screen.findByText("DataPageComponent", {}, { timeout: 5000 })).toBeVisible();
   expect(screen.getByRole("button", { name: /open drawer/i })).toBeInTheDocument();
-});
+}, 10000);
 
 test("switches routes from the navigation drawer", async () => {
+  const { default: App } = await import("../App");
   render(<App />);
 
-  expect(await screen.findByText("DataPageComponent")).toBeVisible();
+  expect(await screen.findByText("DataPageComponent", {}, { timeout: 5000 })).toBeVisible();
 
   await userEvent.click(screen.getByRole("button", { name: /open drawer/i }));
   await userEvent.click(screen.getByRole("link", { name: /^Planning$/i }));
@@ -52,12 +53,13 @@ test("switches routes from the navigation drawer", async () => {
 
   await userEvent.click(screen.getByRole("link", { name: /^Logging$/i }));
   expect(await screen.findByText("LoggingComponent")).toBeVisible();
-});
+}, 10000);
 
 test("renders the current route on initial load", async () => {
   window.history.pushState({}, "", "/cooking");
 
+  const { default: App } = await import("../App");
   render(<App />);
 
   expect(await screen.findByText("CookingComponent")).toBeVisible();
-});
+}, 10000);

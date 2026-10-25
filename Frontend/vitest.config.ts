@@ -10,6 +10,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Bound jsdom workers to avoid starving lazy-route assertions on busy hosts.
+    maxWorkers: 2,
     environment: 'jsdom',
     setupFiles: './src/tests/setupTests.ts',
     include: ['src/**/*.{test,spec}.{js,jsx,ts,tsx}'],

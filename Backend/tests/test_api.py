@@ -5,8 +5,8 @@ from Backend.models.ingredient import Ingredient
 from Backend.models.ingredient_unit import IngredientUnit
 
 
-def test_ingredient_crud(client: TestClient) -> None:
-    response = client.post(
+def test_ingredient_crud(user_a_client: TestClient) -> None:
+    response = user_a_client.post(
         "/api/ingredients/",
         json={"name": "Carrot", "nutrition": None, "units": [], "tags": []},
     )
@@ -15,15 +15,15 @@ def test_ingredient_crud(client: TestClient) -> None:
     ingredient_id = ingredient["id"]
     assert ingredient["name"] == "Carrot"
 
-    response = client.get("/api/ingredients/")
+    response = user_a_client.get("/api/ingredients/")
     assert response.status_code == 200
     assert any(item["id"] == ingredient_id for item in response.json())
 
-    response = client.get(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.get(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 200
     assert response.json()["name"] == "Carrot"
 
-    response = client.put(
+    response = user_a_client.put(
         f"/api/ingredients/{ingredient_id}",
         json={
             "id": ingredient_id,
@@ -36,13 +36,13 @@ def test_ingredient_crud(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["name"] == "Carrot Updated"
 
-    response = client.delete(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.delete(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 200
-    response = client.get(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.get(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 404
 
 
-def test_ingredient_update_with_shopping_unit_id_only(client: TestClient) -> None:
+def test_ingredient_update_with_shopping_unit_id_only(user_a_client: TestClient) -> None:
     """Selecting a preferred unit by id should not require the relationship to be loaded."""
 
     create_payload = {
@@ -54,7 +54,7 @@ def test_ingredient_update_with_shopping_unit_id_only(client: TestClient) -> Non
         ],
         "tags": [],
     }
-    response = client.post("/api/ingredients/", json=create_payload)
+    response = user_a_client.post("/api/ingredients/", json=create_payload)
     assert response.status_code == 201
     ingredient = response.json()
 
@@ -79,13 +79,13 @@ def test_ingredient_update_with_shopping_unit_id_only(client: TestClient) -> Non
         },
     }
 
-    response = client.put(f"/api/ingredients/{ingredient['id']}", json=update_payload)
+    response = user_a_client.put(f"/api/ingredients/{ingredient['id']}", json=update_payload)
     assert response.status_code == 200
     updated = response.json()
     assert updated["shopping_unit_id"] == gram_unit["id"]
     assert updated["shopping_unit"]["name"] == "g"
 
-    response = client.get("/api/ingredients/")
+    response = user_a_client.get("/api/ingredients/")
     assert response.status_code == 200
     fetched = next(item for item in response.json() if item["id"] == ingredient["id"])
     assert fetched["shopping_unit_id"] == gram_unit["id"]
@@ -93,12 +93,13 @@ def test_ingredient_update_with_shopping_unit_id_only(client: TestClient) -> Non
 
 
 def test_update_ingredient_rejects_invalid_shopping_units(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     """Ensure shopping unit updates validate ownership before applying changes."""
 
     with Session(engine) as session:
         ingredient = Ingredient(
+            user_id="test-user",
             name="Bulk Sugar",
             units=[
                 IngredientUnit(name="cup", grams=200.0),
@@ -126,7 +127,7 @@ def test_update_ingredient_rejects_invalid_shopping_units(
         "tags": [],
     }
 
-    response = client.put(
+    response = admin_client.put(
         f"/api/ingredients/{ingredient_id}",
         json={**base_payload, "shopping_unit_id": invalid_unit_id},
     )
@@ -135,7 +136,7 @@ def test_update_ingredient_rejects_invalid_shopping_units(
         "detail": "Preferred shopping unit must belong to the ingredient."
     }
 
-    response = client.put(
+    response = admin_client.put(
         f"/api/ingredients/{ingredient_id}",
         json={**base_payload, "shopping_unit": {"unit_id": invalid_unit_id}},
     )
@@ -144,7 +145,7 @@ def test_update_ingredient_rejects_invalid_shopping_units(
         "detail": "Preferred shopping unit must belong to the ingredient."
     }
 
-    response = client.put(
+    response = admin_client.put(
         f"/api/ingredients/{ingredient_id}",
         json={**base_payload, "shopping_unit_id": valid_unit_id},
     )
@@ -154,8 +155,8 @@ def test_update_ingredient_rejects_invalid_shopping_units(
     assert payload["shopping_unit"]["name"] == "g"
 
 
-def test_food_crud(client: TestClient) -> None:
-    response = client.post(
+def test_food_crud(user_a_client: TestClient) -> None:
+    response = user_a_client.post(
         "/api/foods",
         json={"name": "Test Food", "ingredients": [], "tags": []},
     )
@@ -164,15 +165,15 @@ def test_food_crud(client: TestClient) -> None:
     food_id = food["id"]
     assert food["name"] == "Test Food"
 
-    response = client.get("/api/foods")
+    response = user_a_client.get("/api/foods")
     assert response.status_code == 200
     assert any(item["id"] == food_id for item in response.json())
 
-    response = client.get(f"/api/foods/{food_id}")
+    response = user_a_client.get(f"/api/foods/{food_id}")
     assert response.status_code == 200
     assert response.json()["name"] == "Test Food"
 
-    response = client.put(
+    response = user_a_client.put(
         f"/api/foods/{food_id}",
         json={
             "id": food_id,
@@ -184,7 +185,7 @@ def test_food_crud(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["name"] == "Updated Food"
 
-    response = client.delete(f"/api/foods/{food_id}")
+    response = user_a_client.delete(f"/api/foods/{food_id}")
     assert response.status_code == 200
-    response = client.get(f"/api/foods/{food_id}")
+    response = user_a_client.get(f"/api/foods/{food_id}")
     assert response.status_code == 404

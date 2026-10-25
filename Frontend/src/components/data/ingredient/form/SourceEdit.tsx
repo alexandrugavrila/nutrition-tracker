@@ -1,3 +1,5 @@
+import { parseNutrient, scaleNutrient } from "@/utils/nutrition";
+import { useAccountFetch } from "@/contexts/AccountScope";
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
@@ -125,10 +127,7 @@ const getSearchDisplayUnit = (
   return null;
 };
 
-const normalizeNutritionValue = (value: unknown): number => {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-};
+const normalizeNutritionValue = parseNutrient;
 
 const normalizeMetadataNumber = (value: unknown): number | null => {
   const numeric = Number(value);
@@ -233,10 +232,11 @@ const formatNutritionSummary = (result: UsdaIngredientResult): string => {
   const multiplier = searchDisplayUnit?.multiplier ?? 1;
   const label = searchDisplayUnit?.label ?? getDefaultUnitLabel(result);
 
-  return `${label} · Calories ${formatNutritionValue(result.nutrition.calories * multiplier)} · Protein ${formatNutritionValue(result.nutrition.protein * multiplier)} · Carbs ${formatNutritionValue(result.nutrition.carbohydrates * multiplier)} · Fat ${formatNutritionValue(result.nutrition.fat * multiplier)}`;
+  return `${label} · Calories ${formatNutritionValue(scaleNutrient(result.nutrition.calories, multiplier))} · Protein ${formatNutritionValue(scaleNutrient(result.nutrition.protein, multiplier))} · Carbs ${formatNutritionValue(scaleNutrient(result.nutrition.carbohydrates, multiplier))} · Fat ${formatNutritionValue(scaleNutrient(result.nutrition.fat, multiplier))}`;
 };
 
 function SourceEdit({ ingredient, dispatch, applyUsdaResult }) {
+  const fetch = useAccountFetch();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<UsdaIngredientResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);

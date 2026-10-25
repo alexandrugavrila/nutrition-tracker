@@ -1,4 +1,7 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import React from "react";
+import { AccountScopeContext, createAccountScope } from "@/contexts/AccountScope";
+import { storageKey } from "@/utils/accountStorage";
+import { act, renderHook as renderBaseHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,7 +12,11 @@ import {
 type SessionState = { count: number; label: string };
 type SessionAction = { type: "increment" };
 
-const KEY = "test-key";
+const KEY = storageKey("test-user", "test-key");
+const scope = createAccountScope("test-user", () => {});
+function renderHook<T>(callback: () => T) {
+  return renderBaseHook(callback, { wrapper: ({ children }) => React.createElement(AccountScopeContext.Provider, {value:scope}, children) });
+}
 
 const originalSessionStorageDescriptor = Object.getOwnPropertyDescriptor(
   window,
@@ -66,7 +73,7 @@ afterEach(() => {
 describe("useSessionStorageState", () => {
   it("initializes from defaults when nothing is persisted", async () => {
     const warnSpy = vi.spyOn(console, "warn");
-    const { result } = renderHook(() => useSessionStorageState(KEY, { count: 0 }));
+    const { result } = renderHook(() => useSessionStorageState("test-key", { count: 0 }));
 
     expect(result.current[0]).toEqual({ count: 0 });
     expect(warnSpy).not.toHaveBeenCalled();
@@ -79,14 +86,14 @@ describe("useSessionStorageState", () => {
   it("prefers persisted sessionStorage values over defaults", () => {
     storageStore[KEY] = JSON.stringify({ count: 42 });
 
-    const { result } = renderHook(() => useSessionStorageState(KEY, { count: 0 }));
+    const { result } = renderHook(() => useSessionStorageState("test-key", { count: 0 }));
 
     expect(result.current[0]).toEqual({ count: 42 });
   });
 
   it("supports functional updates and persists the result", async () => {
     const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
-    const { result } = renderHook(() => useSessionStorageState(KEY, 0));
+    const { result } = renderHook(() => useSessionStorageState("test-key", 0));
 
     await waitFor(() => expect(storageStore[KEY]).toEqual(JSON.stringify(0)));
 
@@ -105,7 +112,7 @@ describe("useSessionStorageState", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const removeSpy = vi.spyOn(window.sessionStorage, "removeItem");
 
-    const { result } = renderHook(() => useSessionStorageState(KEY, "fallback"));
+    const { result } = renderHook(() => useSessionStorageState("test-key", "fallback"));
 
     expect(result.current[0]).toBe("fallback");
     expect(removeSpy).toHaveBeenCalledWith(KEY);
@@ -138,7 +145,7 @@ describe("useSessionStorageReducer", () => {
     storageStore[KEY] = JSON.stringify({ count: 5 });
 
     const { result } = renderHook(() =>
-      useSessionStorageReducer(reducer, createInitialState, KEY),
+      useSessionStorageReducer(reducer, createInitialState, "test-key"),
     );
 
     expect(result.current[0]).toEqual({ count: 5, label: "base" });
@@ -148,7 +155,7 @@ describe("useSessionStorageReducer", () => {
     const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
 
     const { result } = renderHook(() =>
-      useSessionStorageReducer(reducer, createInitialState, KEY),
+      useSessionStorageReducer(reducer, createInitialState, "test-key"),
     );
 
     await waitFor(() =>

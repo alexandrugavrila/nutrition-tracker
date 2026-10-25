@@ -73,5 +73,6 @@ publish_ensure_git_tag "$resolved_tag" true
 publish_push_images "$backend_image" "$frontend_image"
 
 echo "Publish complete."
-echo "Next deploy command:"
-echo "  ./scripts/prod/deploy.sh $resolved_tag"
+echo "Resolve the pushed backend/frontend registry digests, then rehearse those exact images."
+echo "Follow docs/release-cutover.md; publishing does not deploy."
+echo "Next: ./scripts/prod/deploy.sh prepare --evidence <directory> --backend <repository@sha256:digest> --frontend <repository@sha256:digest>"

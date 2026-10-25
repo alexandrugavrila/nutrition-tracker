@@ -1,0 +1,7 @@
+# Proposed host-level Caddy configuration inside the dedicated app VM.
+# Replace nutrition.internal only after the LAN DNS entry is allocated.
+# Keep the application's Docker edge on 127.0.0.1:8080.
+nutrition.internal {
+	tls internal
+	reverse_proxy 127.0.0.1:8080
+}

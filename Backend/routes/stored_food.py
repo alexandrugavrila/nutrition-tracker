@@ -10,7 +10,9 @@ from sqlmodel import Session, select
 from sqlalchemy import delete, func, inspect
 from sqlalchemy.exc import SQLAlchemyError
 
+from ..services.visibility import visible_ingredient_clause
 from ..db import get_db
+from ..auth.dependencies import get_current_user
 from ..models import (
     DailyLogEntry,
     Food,
@@ -19,6 +21,7 @@ from ..models import (
     StoredFoodConsume,
     StoredFoodCreate,
     StoredFoodRead,
+    User,
 )
 
 router = APIRouter(prefix="/stored_food", tags=["stored_food"])
@@ -32,14 +35,13 @@ _UNAVAILABLE_DETAIL = (
 
 def _apply_filters(
     statement,
-    user_id: Optional[str],
+    user_id: str,
     only_available: bool,
     day: Optional[date],
 ):
     """Apply list filters to the stored food select statement."""
 
-    if user_id:
-        statement = statement.where(StoredFood.user_id == user_id)
+    statement = statement.where(StoredFood.owner_user_id == user_id)
     if only_available:
         statement = statement.where(StoredFood.remaining_portions > 0)
     if day:
@@ -66,9 +68,35 @@ def _stored_food_table_available(db: Session) -> bool:
         return False
 
 
+def _ingredient_available(db: Session, ingredient_id: int, current_user: User) -> bool:
+    statement = select(Ingredient).where(Ingredient.id == ingredient_id).where(
+        visible_ingredient_clause(current_user.id)
+    )
+    return db.exec(statement).one_or_none() is not None
+
+
+def _food_available(db: Session, food_id: int, current_user: User) -> bool:
+    visibility = Food.user_id == current_user.id
+    statement = select(Food).where(Food.id == food_id).where(visibility)
+    return db.exec(statement).one_or_none() is not None
+
+
+def _get_owned_stored_food(
+    db: Session, stored_food_id: int, current_user: User
+) -> Optional[StoredFood]:
+    statement = (
+        select(StoredFood)
+        .where(StoredFood.id == stored_food_id)
+        .where(StoredFood.owner_user_id == current_user.id)
+    )
+    return db.exec(statement).one_or_none()
+
+
 @router.post("/", response_model=StoredFoodRead, status_code=201)
 def create_stored_food(
-    payload: StoredFoodCreate, db: Session = Depends(get_db)
+    payload: StoredFoodCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> StoredFoodRead:
     """Persist a new stored food entry."""
 
@@ -82,9 +110,13 @@ def create_stored_food(
     remaining = data.pop("remaining_portions", None)
     prepared_at = data.pop("prepared_at", None)
 
-    if data.get("food_id") is not None and db.get(Food, data["food_id"]) is None:
+    if data.get("food_id") is not None and not _food_available(
+        db, data["food_id"], current_user
+    ):
         raise HTTPException(status_code=404, detail="Food not found")
-    if data.get("ingredient_id") is not None and db.get(Ingredient, data["ingredient_id"]) is None:
+    if data.get("ingredient_id") is not None and not _ingredient_available(
+        db, data["ingredient_id"], current_user
+    ):
         raise HTTPException(status_code=404, detail="Ingredient not found")
 
     if prepared_at is None:
@@ -95,6 +127,8 @@ def create_stored_food(
 
     stored_food = StoredFood(
         **data,
+        user_id=current_user.id,
+        owner_user_id=current_user.id,
         prepared_at=prepared_at,
         remaining_portions=max(0.0, float(remaining)),
     )
@@ -111,7 +145,7 @@ def create_stored_food(
 @router.get("/", response_model=List[StoredFoodRead])
 def list_stored_food(
     db: Session = Depends(get_db),
-    user_id: Optional[str] = Query(default=None),
+    current_user: User = Depends(get_current_user),
     only_available: bool = Query(default=False),
     day: Optional[date] = Query(default=None),
 ) -> List[StoredFoodRead]:
@@ -121,7 +155,7 @@ def list_stored_food(
         return []
 
     statement = select(StoredFood).order_by(StoredFood.prepared_at.desc())
-    statement = _apply_filters(statement, user_id, only_available, day)
+    statement = _apply_filters(statement, current_user.id, only_available, day)
     results = db.exec(statement).all()
     return [StoredFoodRead.model_validate(item) for item in results]
 
@@ -131,6 +165,7 @@ def consume_stored_food(
     stored_food_id: int,
     payload: StoredFoodConsume,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> StoredFoodRead:
     """Consume portions from a stored food entry."""
 
@@ -140,7 +175,7 @@ def consume_stored_food(
             detail=_UNAVAILABLE_DETAIL,
         )
 
-    stored_food = db.get(StoredFood, stored_food_id)
+    stored_food = _get_owned_stored_food(db, stored_food_id, current_user)
     if not stored_food:
         raise HTTPException(status_code=404, detail="Stored food not found")
 
@@ -171,13 +206,17 @@ def consume_stored_food(
     response_class=Response,
     response_model=None,
 )
-def delete_stored_food(stored_food_id: int, db: Session = Depends(get_db)) -> None:
+def delete_stored_food(
+    stored_food_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
     """Remove a stored food entry."""
 
     if not _stored_food_table_available(db):
         raise HTTPException(status_code=503, detail=_UNAVAILABLE_DETAIL)
 
-    stored_food = db.get(StoredFood, stored_food_id)
+    stored_food = _get_owned_stored_food(db, stored_food_id, current_user)
     if stored_food is None:
         raise HTTPException(status_code=404, detail="Stored food not found")
 
@@ -203,14 +242,17 @@ def delete_stored_food(stored_food_id: int, db: Session = Depends(get_db)) -> No
     response_class=Response,
     response_model=None,
 )
-def clear_stored_food(user_id: str = Query(...), db: Session = Depends(get_db)) -> None:
+def clear_stored_food(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
     """Remove all stored food entries for a user."""
 
     if not _stored_food_table_available(db):
         return
 
     stored_food_items = db.exec(
-        select(StoredFood).where(StoredFood.user_id == user_id)
+        select(StoredFood).where(StoredFood.owner_user_id == current_user.id)
     ).all()
 
     for stored_food in stored_food_items:
@@ -226,6 +268,6 @@ def clear_stored_food(user_id: str = Query(...), db: Session = Depends(get_db)) 
                 entry.ingredient_id = stored_food.ingredient_id
                 entry.food_id = None
 
-    statement = delete(StoredFood).where(StoredFood.user_id == user_id)
+    statement = delete(StoredFood).where(StoredFood.owner_user_id == current_user.id)
     db.exec(statement)
     db.commit()

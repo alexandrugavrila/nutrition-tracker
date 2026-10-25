@@ -27,7 +27,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 
 import { useData } from "@/contexts/DataContext";
-import apiClient from "@/apiClient";
+import { useAccountClient } from "@/contexts/AccountScope";
 import { useSessionStorageState } from "@/hooks/useSessionStorageState";
 import type { PlanItem } from "@/utils/planningTypes";
 import { aggregateShoppingList } from "@/utils/shopping";
@@ -38,7 +38,6 @@ import type { components } from "@/api-types";
 import useHoverable from "@/hooks/useHoverable";
 
 type IngredientRead = components["schemas"]["IngredientRead"];
-type IngredientUpdate = components["schemas"]["IngredientUpdate"];
 type IngredientWithSelection = IngredientRead & {
   shoppingUnitId?: number | string | null;
 };
@@ -145,6 +144,7 @@ const deriveSelectionValue = (
 };
 
 function Shopping() {
+  const apiClient = useAccountClient();
   const {
     foods,
     ingredients,
@@ -241,74 +241,6 @@ function Shopping() {
     return null;
   }, []);
 
-  const buildUpdatePayload = useCallback(
-    (
-      ingredient: IngredientWithSelection,
-      shoppingUnitId: number | string | null,
-    ): IngredientUpdate => {
-      const units = (ingredient.units ?? [])
-        .filter((unit) => unit.name !== "g")
-        .map((unit) => ({
-          id:
-            typeof unit.id === "number" && Number.isFinite(unit.id) ? unit.id : undefined,
-          name: unit.name ?? "",
-          grams: Number(unit.grams),
-        }));
-
-      const tags = (ingredient.tags ?? []).map((tag) => ({ id: tag.id ?? undefined })).filter((tag) => tag.id != null);
-
-      const nutrition = ingredient.nutrition
-        ? {
-            calories: Number(ingredient.nutrition.calories ?? 0),
-            protein: Number(ingredient.nutrition.protein ?? 0),
-            carbohydrates: Number(ingredient.nutrition.carbohydrates ?? 0),
-            fat: Number(ingredient.nutrition.fat ?? 0),
-            fiber: Number(ingredient.nutrition.fiber ?? 0),
-          }
-        : null;
-
-      const payload: IngredientUpdate = {
-        name: ingredient.name ?? "",
-        nutrition,
-        units: units as IngredientUpdate["units"],
-        tags: tags as IngredientUpdate["tags"],
-      };
-
-      const numericSelection =
-        typeof shoppingUnitId === "number" && Number.isFinite(shoppingUnitId)
-          ? shoppingUnitId
-          : typeof shoppingUnitId === "string"
-          ? Number(shoppingUnitId)
-          : null;
-
-      if (numericSelection !== null && !Number.isNaN(numericSelection)) {
-        payload.shopping_unit_id = numericSelection;
-      } else if (shoppingUnitId === null) {
-        payload.shopping_unit_id = null;
-      } else {
-        const match = (ingredient.units ?? []).find((unit) => {
-          if (unit.id == null && shoppingUnitId === NULL_UNIT_SENTINEL) {
-            return true;
-          }
-          return String(unit.id) === String(shoppingUnitId);
-        });
-        if (match) {
-          payload.shopping_unit = {
-            unit_id:
-              typeof match.id === "number" && Number.isFinite(match.id)
-                ? match.id
-                : undefined,
-            name: match.name ?? "",
-            grams: Number(match.grams),
-          };
-        }
-      }
-
-      return payload;
-    },
-    [],
-  );
-
   const handlePreferredUnitChange = useCallback(
     async (ingredientId: number | null | undefined, value: unknown) => {
       if (ingredientId === null || ingredientId === undefined) return;
@@ -327,9 +259,11 @@ function Shopping() {
 
       startRequest();
       try {
-        const payload = buildUpdatePayload(ingredient, parsed);
+        const selected = ingredient.units?.find(unit => String(unit.id) === String(parsed));
+        const legacyGram = parsed === NULL_UNIT_SENTINEL ? ingredient.units?.find(unit => unit.id != null && Number(unit.grams) === 1) : undefined;
+        const payload = { unit_id: selected?.id ?? legacyGram?.id ?? null };
         await apiClient
-          .path(`/api/ingredients/${ingredientId}`)
+          .path(`/api/ingredients/${ingredientId}/shopping-preference`)
           .method("put")
           .create()({ body: payload });
         setIngredientsNeedsRefetch(true);
@@ -345,7 +279,6 @@ function Shopping() {
       parseSelectionValue,
       setIngredients,
       startRequest,
-      buildUpdatePayload,
       setIngredientsNeedsRefetch,
       endRequest,
     ],

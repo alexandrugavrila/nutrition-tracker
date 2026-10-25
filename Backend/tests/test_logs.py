@@ -7,14 +7,14 @@ from Backend.models import DailyLogEntry, Ingredient, StoredFood
 
 
 def _create_ingredient(session: Session, name: str = "Ingredient") -> Ingredient:
-    ingredient = Ingredient(name=name)
+    ingredient = Ingredient(name=name, user_id="test-user")
     session.add(ingredient)
     session.commit()
     session.refresh(ingredient)
     return ingredient
 
 
-def test_create_and_list_daily_logs(client: TestClient, engine) -> None:
+def test_create_and_list_daily_logs(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Shredded Chicken")
 
@@ -29,11 +29,11 @@ def test_create_and_list_daily_logs(client: TestClient, engine) -> None:
         "per_portion_fiber": 2,
     }
 
-    stored_response = client.post("/api/stored_food/", json=stored_payload)
+    stored_response = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_response.status_code == 201
     stored_data = stored_response.json()
 
-    consume_response = client.post(
+    consume_response = admin_client.post(
         f"/api/stored_food/{stored_data['id']}/consume", json={"portions": 2}
     )
     assert consume_response.status_code == 200
@@ -53,7 +53,7 @@ def test_create_and_list_daily_logs(client: TestClient, engine) -> None:
         "fiber": 4,
     }
 
-    log_response = client.post("/api/logs/", json=log_payload)
+    log_response = admin_client.post("/api/logs/", json=log_payload)
     assert log_response.status_code == 201
     log_entry = log_response.json()
     assert log_entry["id"] is not None
@@ -61,7 +61,7 @@ def test_create_and_list_daily_logs(client: TestClient, engine) -> None:
     assert log_entry["portions_consumed"] == 2
     assert log_entry["calories"] == 400
 
-    list_response = client.get(
+    list_response = admin_client.get(
         f"/api/logs/{log_date.isoformat()}", params={"user_id": stored_payload["user_id"]}
     )
     assert list_response.status_code == 200
@@ -80,7 +80,7 @@ def test_create_and_list_daily_logs(client: TestClient, engine) -> None:
         assert persisted_log.calories == 400
 
 
-def test_daily_log_rejects_negative_macros(client: TestClient, engine) -> None:
+def test_daily_log_rejects_negative_macros(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Steamed Greens")
 
@@ -95,11 +95,11 @@ def test_daily_log_rejects_negative_macros(client: TestClient, engine) -> None:
         "per_portion_fiber": 4,
     }
 
-    stored_response = client.post("/api/stored_food/", json=stored_payload)
+    stored_response = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_response.status_code == 201
     stored_data = stored_response.json()
 
-    consume_response = client.post(
+    consume_response = admin_client.post(
         f"/api/stored_food/{stored_data['id']}/consume", json={"portions": 1}
     )
     assert consume_response.status_code == 200
@@ -116,11 +116,11 @@ def test_daily_log_rejects_negative_macros(client: TestClient, engine) -> None:
         "fiber": 4,
     }
 
-    response = client.post("/api/logs/", json=log_payload)
+    response = admin_client.post("/api/logs/", json=log_payload)
     assert response.status_code == 422
 
 
-def test_delete_daily_log_entry(client: TestClient, engine) -> None:
+def test_delete_daily_log_entry(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Tofu Scramble")
 
@@ -135,7 +135,7 @@ def test_delete_daily_log_entry(client: TestClient, engine) -> None:
         "per_portion_fiber": 3,
     }
 
-    stored_response = client.post("/api/stored_food/", json=stored_payload)
+    stored_response = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_response.status_code == 201
     stored_id = stored_response.json()["id"]
 
@@ -152,18 +152,18 @@ def test_delete_daily_log_entry(client: TestClient, engine) -> None:
         "fiber": 3,
     }
 
-    first_response = client.post("/api/logs/", json=log_payload)
+    first_response = admin_client.post("/api/logs/", json=log_payload)
     assert first_response.status_code == 201
     first_entry = first_response.json()
 
-    second_response = client.post(
+    second_response = admin_client.post(
         "/api/logs/",
         json={**log_payload, "portions_consumed": 0.5, "calories": 75},
     )
     assert second_response.status_code == 201
     second_entry = second_response.json()
 
-    delete_response = client.delete(f"/api/logs/{first_entry['id']}")
+    delete_response = admin_client.delete(f"/api/logs/{first_entry['id']}")
     assert delete_response.status_code == 204
 
     with Session(engine) as session:
@@ -173,7 +173,7 @@ def test_delete_daily_log_entry(client: TestClient, engine) -> None:
         assert remaining is not None
 
 
-def test_clear_daily_logs(client: TestClient, engine) -> None:
+def test_clear_daily_logs(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Overnight Oats")
 
@@ -188,7 +188,7 @@ def test_clear_daily_logs(client: TestClient, engine) -> None:
         "per_portion_fiber": 4,
     }
 
-    stored_creation = client.post("/api/stored_food/", json=stored_payload)
+    stored_creation = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_creation.status_code == 201
     stored_id = stored_creation.json()["id"]
 
@@ -196,7 +196,7 @@ def test_clear_daily_logs(client: TestClient, engine) -> None:
     second_date = date(2024, 4, 2)
 
     for log_date in (first_date, second_date):
-        response = client.post(
+        response = admin_client.post(
             "/api/logs/",
             json={
                 "user_id": stored_payload["user_id"],
@@ -212,31 +212,31 @@ def test_clear_daily_logs(client: TestClient, engine) -> None:
         )
         assert response.status_code == 201
 
-    clear_response = client.delete(
+    clear_response = admin_client.delete(
         "/api/logs/",
         params={"user_id": stored_payload["user_id"], "log_date": first_date.isoformat()},
     )
     assert clear_response.status_code == 204
 
-    list_first = client.get(
+    list_first = admin_client.get(
         f"/api/logs/{first_date.isoformat()}", params={"user_id": stored_payload["user_id"]}
     )
     assert list_first.status_code == 200
     assert list_first.json() == []
 
-    list_second = client.get(
+    list_second = admin_client.get(
         f"/api/logs/{second_date.isoformat()}",
         params={"user_id": stored_payload["user_id"]},
     )
     assert list_second.status_code == 200
     assert len(list_second.json()) == 1
 
-    clear_all_response = client.delete(
+    clear_all_response = admin_client.delete(
         "/api/logs/", params={"user_id": stored_payload["user_id"]}
     )
     assert clear_all_response.status_code == 204
 
-    list_second_after = client.get(
+    list_second_after = admin_client.get(
         f"/api/logs/{second_date.isoformat()}",
         params={"user_id": stored_payload["user_id"]},
     )

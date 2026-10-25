@@ -41,21 +41,30 @@ def test_db_auto_create_can_be_overridden(monkeypatch):
     assert settings.db_auto_create is False
 
 
-def test_production_requires_usda_api_key(monkeypatch):
+def test_production_allows_missing_usda_api_key(monkeypatch):
     monkeypatch.setenv(
         "DATABASE_URL", "postgresql://nutrition_user:secret@db:5432/nutrition"
     )
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("SESSION_SECURE_COOKIE", raising=False)
     monkeypatch.delenv("USDA_API_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="USDA_API_KEY is required"):
-        _reload_settings()
+    assert _reload_settings().usda_api_key is None
 
 
 def test_production_requires_database_password(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://nutrition_user@db:5432/nutrition")
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("SESSION_SECURE_COOKIE", raising=False)
     monkeypatch.setenv("USDA_API_KEY", "set")
 
     with pytest.raises(RuntimeError, match="DATABASE_URL must include a database password"):
+        _reload_settings()
+
+
+def test_production_rejects_insecure_cookie_override(monkeypatch):
+    monkeypatch.setenv('DATABASE_URL', 'postgresql://test:test@db:5432/test')
+    monkeypatch.setenv('ENVIRONMENT', 'production')
+    monkeypatch.setenv('SESSION_SECURE_COOKIE', 'false')
+    with pytest.raises(RuntimeError, match='secure session cookies'):
         _reload_settings()

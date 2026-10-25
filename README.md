@@ -27,6 +27,7 @@ A full-stack nutrition planning and tracking app built with:
    ```
    - New working branches are created from the latest `origin/development`, regardless of which worktree invokes the helper. Existing local or remote branches keep their existing history.
    - The script fetches remote refs, creates local tracking branches for remote-only branches, then creates `nutrition-feature-my-feature` under the worktree parent (default: parent of the primary clone) and reopens the folder in VS Code (use `-SkipVSCode` to opt out).
+   - Prefer `-CopyEnv` when creating or reopening a worktree so the current `.env` is copied into the target when it does not already exist there.
    - Worktrees let every branch mount its own code directory and Postgres volume, so multiple stacks can run in parallel.
 
    Bash users can run the script through `pwsh` (PowerShell 7+ is cross-platform).
@@ -90,33 +91,10 @@ See [Branching, integration, and releases](CONTRIBUTING.md#branching-integration
 - `docker-compose.yml` is **development-only**. It builds local images, bind-mounts `Backend/` and `Frontend/`, and enables hot reload for iterative coding.
 - `docker-compose.prod.yml` is **production-focused**. It runs prebuilt immutable images, uses an `env_file` (`.env.production`), enforces required runtime variables via `${VAR:?error}` checks, and persists only PostgreSQL data in a named volume. Start from `.env.production.example` when creating the production env file.
 
-Production entrypoint example:
-
-```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
-```
-
-Manual production helper scripts:
-
-```bash
-./scripts/prod/backup.sh --label manual
-./scripts/prod/deploy.sh v1.2.0-alpha
-./scripts/prod/migrate.sh
-./scripts/prod/rollback.sh v1.1.9
-```
-
-```pwsh
-pwsh ./scripts/prod/backup.ps1 -Label manual
-pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
-pwsh ./scripts/prod/migrate.ps1
-pwsh ./scripts/prod/rollback.ps1 -Tag v1.1.9
-```
-
-The production helpers use `docker-compose.prod.yml` together with
-`.env.production`, resolve paths from the script location, fail loudly on
-errors, and never delete volumes as part of normal deploy or rollback flows.
-Deploy now takes an explicit pre-migration snapshot automatically, while
-rollback restores the database only when you opt in with a specific snapshot.
+Production deployment uses immutable image digests and explicit maintenance,
+schema expansion, ownership adoption, and finalization checkpoints. Follow the
+[release cutover runbook](docs/release-cutover.md) before starting services.
+Single-tag deployment and automatic image rollback are no longer supported.
 
 Development entrypoint remains the branch-aware wrapper:
 
@@ -198,7 +176,7 @@ What the publish script does:
 4. Builds the frontend image from `Frontend/Dockerfile`.
 5. Pushes or verifies the matching annotated Git tag on `origin`.
 6. Pushes both images with the requested immutable tag.
-7. Prints the matching production deploy command for that tag.
+7. Prints the next steps for resolving digests and staged deployment.
 
 ### Git-tag linkage
 
@@ -232,174 +210,27 @@ Recommendation:
 
 ### Publish then deploy
 
-Once publish succeeds, deploy the same tag on the server:
-
-```bash
-./scripts/prod/deploy.sh v1.2.0-alpha
-```
-
-```pwsh
-pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
-```
-
----
+Resolve the published backend and frontend digests, rehearse those exact images,
+and follow the [release cutover runbook](docs/release-cutover.md). Publishing does
+not deploy or authorize database migration.
 
 ## Production Deployment
 
-### Server prerequisites
+The [release cutover runbook](docs/release-cutover.md) is authoritative for fresh
+installation, populated upgrades, backup verification, explicit adoption and
+recovery. See [CONTRIBUTING.md](CONTRIBUTING.md#production-cutover-scripts-script-catalog-update)
+for the staged helper interface and [home-server preparation](docs/home-server-preparation.md)
+for the owner-selected private HTTP setup.
 
-1. Install Docker Engine plus the Docker Compose plugin on the target server.
-2. Make sure the server can pull your published images (`docker login ghcr.io` or your registry equivalent if required).
-3. Clone this repository onto the server.
-4. Copy `.env.production.example` to `.env.production`.
-5. Populate `.env.production` with real production values:
-   - `BACKEND_IMAGE` and `FRONTEND_IMAGE` should point at the published image repositories.
-   - `DATABASE_URL` must use the Compose service hostname `db`, not `localhost`.
-   - `DB_AUTO_CREATE` should stay `false`.
-   - `CORS_ALLOW_ORIGINS` should be your real public origin(s).
-   - `PROD_HTTP_PORT` and `PROD_HTTPS_PORT` should match the host ports you want to expose.
-   - `EDGE_TLS_CERTS_DIR` must point at a directory containing `tls.crt` and `tls.key` if you are serving TLS from the bundled edge container.
-6. Keep `.env.production` untracked and inject secrets from your server, deployment platform, or secret manager.
+Deployment proceeds through `prepare`, `maintenance`, `expand`, `report`, and
+`finalize`. Supply both immutable image digests at preparation. Review the
+adoption report before finalization; starting application services is a separate
+step after invariant checks. Never replace these checkpoints with `upgrade head`
+or an unconditional Compose startup on a legacy database.
 
-### First-time production deploy
-
-The intended production model is:
-
-1. Build and publish backend/frontend images somewhere else.
-2. Put the desired image repositories and runtime secrets in `.env.production`.
-3. Deploy a concrete immutable tag on the server.
-
-Bash:
-
-```bash
-./scripts/prod/deploy.sh v1.2.0-alpha
-```
-
-PowerShell:
-
-```pwsh
-pwsh ./scripts/prod/deploy.ps1 -Tag v1.2.0-alpha
-```
-
-What the deploy script does:
-
-1. Creates a production snapshot under `Database/backups/production/` before touching image tags or migrations.
-2. Updates only `BACKEND_IMAGE` and `FRONTEND_IMAGE` in `.env.production` to the requested tag.
-3. Pulls the configured production images.
-4. Starts `db` if needed and runs `alembic upgrade head` through a one-off `backend` container.
-5. Refreshes the full production stack with `docker compose ... up -d --force-recreate --remove-orphans`.
-6. Waits for `db`, `backend`, `frontend`, and `edge` health, then checks:
-   - `/healthz`
-   - `/api/ingredients/`
-   - `/api/foods/`
-
-After the first deploy, verify:
-
-```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:8080/healthz
-curl -fsS http://127.0.0.1:8080/api/ingredients/
-curl -fsS http://127.0.0.1:8080/api/foods/
-```
-
-Adjust the port if `PROD_HTTP_PORT` is not `8080`.
-
-### Updating an existing production deployment
-
-When a new backend/frontend version is published:
-
-1. Confirm the new immutable tag exists in your image registry.
-2. Run the deploy script with that tag.
-3. Record the printed pre-deploy snapshot path so you can restore that exact pre-change database state if needed.
-4. Review the final `docker compose ps` output and the HTTP checks.
-
-Example:
-
-```bash
-./scripts/prod/deploy.sh v1.2.1
-```
-
-The deploy script does not wipe data, delete volumes, run `down -v`, or attempt automatic rollback.
-
-### Snapshot only
-
-If you want an explicit manual production snapshot outside a deployment:
-
-```bash
-./scripts/prod/backup.sh --label before-maintenance
-```
-
-```pwsh
-pwsh ./scripts/prod/backup.ps1 -Label before-maintenance
-```
-
-This writes:
-
-- `Database/backups/production/production-<label>-<timestamp>.dump`
-- `Database/backups/production/production-<label>-<timestamp>.dump.meta.json`
-
-The metadata file includes the Alembic revision plus the current backend/frontend image references, which the rollback script can reuse.
-
-### Migration only
-
-If the images are already pinned in `.env.production` and you only need to run the production migration job:
-
-```bash
-./scripts/prod/migrate.sh
-```
-
-```pwsh
-pwsh ./scripts/prod/migrate.ps1
-```
-
-This starts `db` if needed, waits for health, and runs the one-off Alembic upgrade through the production backend service definition.
-
-### Rollback
-
-There are two rollback modes.
-
-App-image rollback only:
-
-```bash
-./scripts/prod/rollback.sh v1.1.9
-```
-
-```pwsh
-pwsh ./scripts/prod/rollback.ps1 -Tag v1.1.9
-```
-
-This changes only `BACKEND_IMAGE` and `FRONTEND_IMAGE` in `.env.production`, pulls those images, and refreshes the stack. It does not restore the database. Use this only when the older app version is compatible with the current schema.
-
-App-image rollback plus explicit database restore:
-
-```bash
-./scripts/prod/rollback.sh --snapshot Database/backups/production/production-predeploy-1.2.0-20260419-103000.dump --restore-database --reset-schema
-```
-
-```pwsh
-pwsh ./scripts/prod/rollback.ps1 -SnapshotPath Database/backups/production/production-predeploy-1.2.0-20260419-103000.dump -RestoreDatabase -ResetSchema
-```
-
-If the snapshot metadata contains `backend_image` and `frontend_image`, the rollback script can restore those exact image refs even when you omit `Tag`. If the metadata is missing or incomplete, supply `Tag` explicitly.
-
-Important rollback constraints:
-
-- Database restore is intentionally explicit and destructive. It is not run automatically during normal deploys.
-- The rollback scripts do not attempt Alembic downgrades.
-- If you restore a snapshot, the app services are stopped before the restore and then recreated afterward.
-- If you only roll back images after a forward migration, schema compatibility is your responsibility.
-
-### Minimal server update routine
-
-For a typical release on a real server:
-
-1. Pull the latest repo changes if you keep deployment scripts under version control on the server.
-2. Ensure `.env.production` still points at the correct image repositories and secrets.
-3. Run `./scripts/prod/deploy.sh <tag>` or `pwsh ./scripts/prod/deploy.ps1 -Tag <tag>`.
-4. Save the printed snapshot path in your deployment notes.
-5. If the deploy fails after migration or if the new app is incompatible:
-   - app-only issue: run the rollback script with the previous tag;
-   - schema/data issue: restore the printed snapshot and then roll back app images.
+Recovery after ownership cutover requires the reviewed backup/image pairing and
+a restore into a clean database. The legacy rollback helpers deliberately fail
+closed; image-only rollback is not a substitute for restoring compatible data.
 
 ---
 
@@ -412,9 +243,9 @@ For a typical release on a real server:
 - `pwsh ./scripts/db/migrate.ps1` / `./scripts/db/migrate.sh`: explicit migration job for deploy pipelines (run before app traffic).
 - `pwsh ./scripts/prod/publish.ps1 [-Tag <tag>]` / `./scripts/prod/publish.sh [<tag>]`: validate a clean `development` → `main` release merge and `vMAJOR.MINOR.PATCH[-prerelease]` identifier, create/verify the matching local and remote Git tag, and publish immutable backend/frontend images using registry credentials from env or `.env.publish`.
 - `pwsh ./scripts/prod/backup.ps1 [-Label <label>]` / `./scripts/prod/backup.sh [--label <label>]`: create a production database snapshot plus metadata describing the current Alembic revision and image refs.
-- `pwsh ./scripts/prod/deploy.ps1 -Tag <tag>` / `./scripts/prod/deploy.sh <tag>`: create a pre-deploy snapshot, update production backend/frontend image tags, pull images, run Alembic migrations, refresh the prod stack, and verify the deployed endpoints.
+- `prod/deploy.ps1` / `prod/deploy.sh`: staged digest-based cutover; see the [runbook](docs/release-cutover.md).
 - `pwsh ./scripts/prod/migrate.ps1` / `./scripts/prod/migrate.sh`: run production Alembic migrations against `docker-compose.prod.yml` without tearing the stack down.
-- `pwsh ./scripts/prod/rollback.ps1 [-Tag <tag>] [-SnapshotPath <dump>] [-RestoreDatabase] [-ResetSchema]` / `./scripts/prod/rollback.sh [<tag>] [--snapshot <dump>] [--restore-database] [--reset-schema]`: roll back app images and optionally restore an explicit production snapshot.
+- `prod/rollback.ps1` / `prod/rollback.sh`: fail closed; follow the reviewed recovery runbook.
 - `pwsh ./scripts/run-tests.ps1 [-sync] [-e2e]`: run backend + frontend tests with optional API/migration sync and branch-isolated API/browser e2e suites. Bash variant: `./scripts/run-tests.sh`.
 - `pwsh ./scripts/db/backup.ps1` / `restore.ps1`: create or restore branch-local Postgres backups. Bash variants available in the same directory.
 - `pwsh ./scripts/db/export-to-csv.ps1` / `./scripts/db/export-to-csv.sh`: export the current database tables to CSV (production by default, `--test` or `--output-dir` available).

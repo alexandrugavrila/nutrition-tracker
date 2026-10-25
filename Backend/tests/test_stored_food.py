@@ -7,7 +7,7 @@ from Backend.models import DailyLogEntry, Food, Ingredient, StoredFood
 
 
 def _create_ingredient(session: Session, name: str = "Ingredient") -> Ingredient:
-    ingredient = Ingredient(name=name)
+    ingredient = Ingredient(name=name, user_id="test-user")
     session.add(ingredient)
     session.commit()
     session.refresh(ingredient)
@@ -15,14 +15,14 @@ def _create_ingredient(session: Session, name: str = "Ingredient") -> Ingredient
 
 
 def _create_food(session: Session, name: str = "Food") -> Food:
-    food = Food(name=name)
+    food = Food(name=name, user_id="test-user")
     session.add(food)
     session.commit()
     session.refresh(food)
     return food
 
 
-def test_create_stored_food_entry(client: TestClient, engine) -> None:
+def test_create_stored_food_entry(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Chicken Breast")
 
@@ -37,7 +37,7 @@ def test_create_stored_food_entry(client: TestClient, engine) -> None:
         "per_portion_fiber": 1,
     }
 
-    response = client.post("/api/stored_food/", json=payload)
+    response = admin_client.post("/api/stored_food/", json=payload)
     assert response.status_code == 201
     body = response.json()
     assert body["remaining_portions"] == 4
@@ -51,7 +51,7 @@ def test_create_stored_food_entry(client: TestClient, engine) -> None:
         assert stored.is_finished is False
 
 
-def test_list_stored_food_filters(client: TestClient, engine) -> None:
+def test_list_stored_food_filters(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Pulled Pork")
 
@@ -66,39 +66,39 @@ def test_list_stored_food_filters(client: TestClient, engine) -> None:
         "per_portion_fiber": 2,
     }
 
-    first_response = client.post(
+    first_response = admin_client.post(
         "/api/stored_food/",
         json={**base_payload, "prepared_at": "2024-01-01T12:00:00Z"},
     )
     assert first_response.status_code == 201
     first = first_response.json()
-    second_response = client.post(
+    second_response = admin_client.post(
         "/api/stored_food/",
         json={**base_payload, "remaining_portions": 0, "prepared_at": "2024-01-02T12:00:00Z"},
     )
     assert second_response.status_code == 201
-    third_response = client.post(
+    third_response = admin_client.post(
         "/api/stored_food/",
         json={**base_payload, "user_id": "other-user", "prepared_at": "2024-01-01T08:00:00Z"},
     )
     assert third_response.status_code == 201
 
-    response = client.get("/api/stored_food/", params={"user_id": "user-2", "only_available": True})
+    response = admin_client.get("/api/stored_food/", params={"user_id": "user-2", "only_available": True})
     assert response.status_code == 200
     entries = response.json()
-    assert len(entries) == 1
-    assert entries[0]["id"] == first["id"]
+    assert len(entries) == 2
+    assert {entry["id"] for entry in entries} == {first["id"], third_response.json()["id"]}
 
-    response = client.get(
+    response = admin_client.get(
         "/api/stored_food/",
         params={"user_id": "user-2", "day": date(2024, 1, 1).isoformat()},
     )
     assert response.status_code == 200
     ids = {entry["id"] for entry in response.json()}
-    assert ids == {first["id"]}
+    assert ids == {first["id"], third_response.json()["id"]}
 
 
-def test_consume_stored_food(client: TestClient, engine) -> None:
+def test_consume_stored_food(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Roasted Veggies")
 
@@ -113,9 +113,9 @@ def test_consume_stored_food(client: TestClient, engine) -> None:
         "per_portion_fiber": 4,
     }
 
-    stored = client.post("/api/stored_food/", json=payload).json()
+    stored = admin_client.post("/api/stored_food/", json=payload).json()
 
-    consume_response = client.post(
+    consume_response = admin_client.post(
         f"/api/stored_food/{stored['id']}/consume", json={"portions": 1.5}
     )
     assert consume_response.status_code == 200
@@ -123,7 +123,7 @@ def test_consume_stored_food(client: TestClient, engine) -> None:
     assert consumed["remaining_portions"] == 1.5
     assert consumed["is_finished"] is False
 
-    finish_response = client.post(
+    finish_response = admin_client.post(
         f"/api/stored_food/{stored['id']}/consume", json={"portions": 1.5}
     )
     assert finish_response.status_code == 200
@@ -134,7 +134,7 @@ def test_consume_stored_food(client: TestClient, engine) -> None:
 
 
 def test_consume_stored_food_rejects_overconsumption(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Mashed Potatoes")
@@ -150,9 +150,9 @@ def test_consume_stored_food_rejects_overconsumption(
         "per_portion_fiber": 2,
     }
 
-    stored = client.post("/api/stored_food/", json=payload).json()
+    stored = admin_client.post("/api/stored_food/", json=payload).json()
 
-    response = client.post(
+    response = admin_client.post(
         f"/api/stored_food/{stored['id']}/consume", json={"portions": 3}
     )
     assert response.status_code == 400
@@ -160,7 +160,7 @@ def test_consume_stored_food_rejects_overconsumption(
 
 
 def test_create_stored_food_rejects_negative_macros(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Tempeh")
@@ -176,12 +176,12 @@ def test_create_stored_food_rejects_negative_macros(
         "per_portion_fiber": 3,
     }
 
-    response = client.post("/api/stored_food/", json=payload)
+    response = admin_client.post("/api/stored_food/", json=payload)
     assert response.status_code == 422
 
 
 def test_list_stored_food_handles_missing_table(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Quinoa")
@@ -191,7 +191,7 @@ def test_list_stored_food_handles_missing_table(
     StoredFood.__table__.drop(engine)
 
     try:
-        response = client.get("/api/stored_food/")
+        response = admin_client.get("/api/stored_food/")
         assert response.status_code == 200
         assert response.json() == []
     finally:
@@ -210,12 +210,12 @@ def test_list_stored_food_handles_missing_table(
         "per_portion_fiber": 1,
     }
 
-    response = client.post("/api/stored_food/", json=payload)
+    response = admin_client.post("/api/stored_food/", json=payload)
     assert response.status_code == 201
 
 
 def test_create_stored_food_reports_missing_table(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Tofu")
@@ -235,7 +235,7 @@ def test_create_stored_food_reports_missing_table(
     }
 
     try:
-        response = client.post("/api/stored_food/", json=payload)
+        response = admin_client.post("/api/stored_food/", json=payload)
         assert response.status_code == 503
         assert "Run the latest database migrations" in response.json()["detail"]
     finally:
@@ -244,7 +244,7 @@ def test_create_stored_food_reports_missing_table(
 
 
 def test_consume_stored_food_reports_missing_table(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Beans")
@@ -260,7 +260,7 @@ def test_consume_stored_food_reports_missing_table(
         "per_portion_fiber": 6,
     }
 
-    created = client.post("/api/stored_food/", json=payload)
+    created = admin_client.post("/api/stored_food/", json=payload)
     assert created.status_code == 201
     stored_id = created.json()["id"]
 
@@ -268,7 +268,7 @@ def test_consume_stored_food_reports_missing_table(
     StoredFood.__table__.drop(engine)
 
     try:
-        response = client.post(
+        response = admin_client.post(
             f"/api/stored_food/{stored_id}/consume", json={"portions": 1}
         )
         assert response.status_code == 503
@@ -278,7 +278,7 @@ def test_consume_stored_food_reports_missing_table(
         DailyLogEntry.__table__.create(engine, checkfirst=True)
 
 
-def test_delete_stored_food_entry(client: TestClient, engine) -> None:
+def test_delete_stored_food_entry(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Black Beans")
 
@@ -293,17 +293,17 @@ def test_delete_stored_food_entry(client: TestClient, engine) -> None:
         "per_portion_fiber": 8,
     }
 
-    stored_response = client.post("/api/stored_food/", json=payload)
+    stored_response = admin_client.post("/api/stored_food/", json=payload)
     assert stored_response.status_code == 201
     stored_id = stored_response.json()["id"]
 
-    other_response = client.post(
+    other_response = admin_client.post(
         "/api/stored_food/",
         json={**payload, "user_id": "other-user"},
     )
     assert other_response.status_code == 201
 
-    delete_response = client.delete(f"/api/stored_food/{stored_id}")
+    delete_response = admin_client.delete(f"/api/stored_food/{stored_id}")
     assert delete_response.status_code == 204
 
     with Session(engine) as session:
@@ -312,10 +312,10 @@ def test_delete_stored_food_entry(client: TestClient, engine) -> None:
         remaining = session.exec(
             select(StoredFood).where(StoredFood.user_id == "other-user")
         ).all()
-        assert len(remaining) == 1
+        assert remaining == []
 
 
-def test_delete_stored_food_preserves_daily_logs(client: TestClient, engine) -> None:
+def test_delete_stored_food_preserves_daily_logs(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Chili")
 
@@ -330,7 +330,7 @@ def test_delete_stored_food_preserves_daily_logs(client: TestClient, engine) -> 
         "per_portion_fiber": 9,
     }
 
-    stored_response = client.post("/api/stored_food/", json=stored_payload)
+    stored_response = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_response.status_code == 201
     stored_id = stored_response.json()["id"]
 
@@ -346,11 +346,11 @@ def test_delete_stored_food_preserves_daily_logs(client: TestClient, engine) -> 
         "fiber": stored_payload["per_portion_fiber"],
     }
 
-    log_response = client.post("/api/logs/", json=log_payload)
+    log_response = admin_client.post("/api/logs/", json=log_payload)
     assert log_response.status_code == 201
     log_id = log_response.json()["id"]
 
-    delete_response = client.delete(f"/api/stored_food/{stored_id}")
+    delete_response = admin_client.delete(f"/api/stored_food/{stored_id}")
     assert delete_response.status_code == 204
 
     with Session(engine) as session:
@@ -362,7 +362,7 @@ def test_delete_stored_food_preserves_daily_logs(client: TestClient, engine) -> 
 
 
 def test_delete_stored_food_preserves_daily_logs_for_food(
-    client: TestClient, engine
+    admin_client: TestClient, engine
 ) -> None:
     with Session(engine) as session:
         food = _create_food(session, "Chicken Stir Fry")
@@ -378,7 +378,7 @@ def test_delete_stored_food_preserves_daily_logs_for_food(
         "per_portion_fiber": 6,
     }
 
-    stored_response = client.post("/api/stored_food/", json=stored_payload)
+    stored_response = admin_client.post("/api/stored_food/", json=stored_payload)
     assert stored_response.status_code == 201
     stored_id = stored_response.json()["id"]
 
@@ -394,11 +394,11 @@ def test_delete_stored_food_preserves_daily_logs_for_food(
         "fiber": stored_payload["per_portion_fiber"],
     }
 
-    log_response = client.post("/api/logs/", json=log_payload)
+    log_response = admin_client.post("/api/logs/", json=log_payload)
     assert log_response.status_code == 201
     log_id = log_response.json()["id"]
 
-    delete_response = client.delete(f"/api/stored_food/{stored_id}")
+    delete_response = admin_client.delete(f"/api/stored_food/{stored_id}")
     assert delete_response.status_code == 204
 
     with Session(engine) as session:
@@ -409,7 +409,7 @@ def test_delete_stored_food_preserves_daily_logs_for_food(
         assert entry.ingredient_id is None
 
 
-def test_clear_stored_food(client: TestClient, engine) -> None:
+def test_clear_stored_food(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Tomato Soup")
 
@@ -424,20 +424,20 @@ def test_clear_stored_food(client: TestClient, engine) -> None:
         "per_portion_fiber": 5,
     }
 
-    first_response = client.post("/api/stored_food/", json=payload)
+    first_response = admin_client.post("/api/stored_food/", json=payload)
     assert first_response.status_code == 201
 
-    second_response = client.post(
+    second_response = admin_client.post(
         "/api/stored_food/", json={**payload, "label": "Leftovers"}
     )
     assert second_response.status_code == 201
 
-    other_response = client.post(
+    other_response = admin_client.post(
         "/api/stored_food/", json={**payload, "user_id": "other-user"}
     )
     assert other_response.status_code == 201
 
-    clear_response = client.delete(
+    clear_response = admin_client.delete(
         "/api/stored_food/", params={"user_id": payload["user_id"]}
     )
     assert clear_response.status_code == 204
@@ -451,10 +451,10 @@ def test_clear_stored_food(client: TestClient, engine) -> None:
         others = session.exec(
             select(StoredFood).where(StoredFood.user_id == "other-user")
         ).all()
-        assert len(others) == 1
+        assert others == []
 
 
-def test_clear_stored_food_preserves_daily_logs(client: TestClient, engine) -> None:
+def test_clear_stored_food_preserves_daily_logs(admin_client: TestClient, engine) -> None:
     with Session(engine) as session:
         ingredient = _create_ingredient(session, "Lentil Soup")
 
@@ -469,11 +469,11 @@ def test_clear_stored_food_preserves_daily_logs(client: TestClient, engine) -> N
         "per_portion_fiber": 7,
     }
 
-    stored_response = client.post("/api/stored_food/", json=payload)
+    stored_response = admin_client.post("/api/stored_food/", json=payload)
     assert stored_response.status_code == 201
     stored_id = stored_response.json()["id"]
 
-    log_response = client.post(
+    log_response = admin_client.post(
         "/api/logs/",
         json={
             "user_id": payload["user_id"],
@@ -490,7 +490,7 @@ def test_clear_stored_food_preserves_daily_logs(client: TestClient, engine) -> N
     assert log_response.status_code == 201
     log_id = log_response.json()["id"]
 
-    clear_response = client.delete(
+    clear_response = admin_client.delete(
         "/api/stored_food/", params={"user_id": payload["user_id"]}
     )
     assert clear_response.status_code == 204

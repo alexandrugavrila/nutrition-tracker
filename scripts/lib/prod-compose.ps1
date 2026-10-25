@@ -426,6 +426,5 @@ function Wait-ProdStackReady {
   $httpPort = Get-ProdHttpPort
   Write-Host "Running post-deploy HTTP checks on port $httpPort..."
   Wait-ProdHttp -Url "http://127.0.0.1:$httpPort/healthz" -TimeoutSeconds 60
-  Wait-ProdHttp -Url "http://127.0.0.1:$httpPort/api/ingredients/" -TimeoutSeconds 60
-  Wait-ProdHttp -Url "http://127.0.0.1:$httpPort/api/foods/" -TimeoutSeconds 60
+  Wait-ProdHttp -Url "http://127.0.0.1:$httpPort/api/health/ready" -TimeoutSeconds 60
 }

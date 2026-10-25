@@ -39,10 +39,13 @@ class StoredFood(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: str = Field(sa_column=Column(String(255), nullable=False, index=True))
-    label: Optional[str] = Field(
-        default=None, sa_column=Column(String(255), nullable=True)
+    # Legacy identity retained verbatim until explicit adoption.
+    owner_user_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(36), ForeignKey("users.id"), nullable=False, index=True),
     )
+    user_id: str = Field(sa_column=Column(String(255), nullable=False, index=True))
+    label: Optional[str] = Field(default=None, sa_column=Column(String(255), nullable=True))
     food_id: Optional[int] = Field(
         default=None, sa_column=Column(ForeignKey("foods.id", ondelete="CASCADE"))
     )
@@ -51,11 +54,13 @@ class StoredFood(SQLModel, table=True):
     )
     prepared_portions: float = Field(sa_column=Column(Float, nullable=False))
     remaining_portions: float = Field(sa_column=Column(Float, nullable=False))
-    per_portion_calories: float = Field(sa_column=Column(Float, nullable=False))
-    per_portion_protein: float = Field(sa_column=Column(Float, nullable=False))
-    per_portion_carbohydrates: float = Field(sa_column=Column(Float, nullable=False))
-    per_portion_fat: float = Field(sa_column=Column(Float, nullable=False))
-    per_portion_fiber: float = Field(sa_column=Column(Float, nullable=False))
+    per_portion_calories: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    per_portion_protein: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    per_portion_carbohydrates: float | None = Field(
+        default=None, sa_column=Column(Float, nullable=True)
+    )
+    per_portion_fat: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    per_portion_fiber: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     is_finished: bool = Field(
         default=False, sa_column=Column(Boolean, nullable=False, server_default="false")
     )

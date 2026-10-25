@@ -1,3 +1,4 @@
+import { scaleNutrient } from "@/utils/nutrition";
 // IngredientTable.js
 
 import React, { useState } from "react";
@@ -282,11 +283,11 @@ function IngredientTable({
                       ))}
                     </Select>
                   </TableCell>
-                  <TableCell>{formatCellNumber((ingredient.nutrition?.calories ?? 0) * gramsPerUnit)}</TableCell>
-                  <TableCell>{formatCellNumber((ingredient.nutrition?.protein ?? 0) * gramsPerUnit)}</TableCell>
-                  <TableCell>{formatCellNumber((ingredient.nutrition?.carbohydrates ?? 0) * gramsPerUnit)}</TableCell>
-                  <TableCell>{formatCellNumber((ingredient.nutrition?.fat ?? 0) * gramsPerUnit)}</TableCell>
-                  <TableCell>{formatCellNumber((ingredient.nutrition?.fiber ?? 0) * gramsPerUnit)}</TableCell>
+                  <TableCell>{formatCellNumber(scaleNutrient(ingredient.nutrition?.calories, gramsPerUnit))}</TableCell>
+                  <TableCell>{formatCellNumber(scaleNutrient(ingredient.nutrition?.protein, gramsPerUnit))}</TableCell>
+                  <TableCell>{formatCellNumber(scaleNutrient(ingredient.nutrition?.carbohydrates, gramsPerUnit))}</TableCell>
+                  <TableCell>{formatCellNumber(scaleNutrient(ingredient.nutrition?.fat, gramsPerUnit))}</TableCell>
+                  <TableCell>{formatCellNumber(scaleNutrient(ingredient.nutrition?.fiber, gramsPerUnit))}</TableCell>
                   <TableCell align="right">
                     <Stack
                       direction="row"

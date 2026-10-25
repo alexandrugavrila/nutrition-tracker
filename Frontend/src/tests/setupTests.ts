@@ -8,7 +8,29 @@ beforeEach(() => {
 // Provide a simple fetch mock so tests don't hit the network.
 vi.stubGlobal(
   'fetch',
-  (async () => {
+  (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/api/auth/me')) {
+      return new Response(
+        JSON.stringify({
+          authenticated: true,
+          user: {
+            id: 'user-1',
+            email: 'user@example.com',
+            display_name: 'Test User',
+            is_active: true,
+            is_admin: false,
+            last_login_at: null,
+            created_at: '2026-04-19T00:00:00Z',
+            updated_at: '2026-04-19T00:00:00Z',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      );
+    }
     return new Response('[]', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

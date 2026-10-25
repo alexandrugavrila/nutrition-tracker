@@ -1,30 +1,43 @@
-import React, { useEffect, useCallback, useRef, useState } from "react";
-import { Button, Collapse, Paper, Dialog, DialogTitle, DialogContent, DialogActions, Box } from "@mui/material";
+import React, { useEffect, useCallback, useRef, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Collapse,
+  Paper,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Box,
+} from '@mui/material';
 
-import NameEdit from "./NameEdit";
-import SourceEdit from "./SourceEdit";
-import UnitEdit from "./UnitEdit";
-import NutritionEdit from "./NutritionEdit";
-import TagEdit from "./TagEdit";
-import { useIngredientForm } from "./useIngredientForm";
-import { useSessionStorageState } from "@/hooks/useSessionStorageState";
-import type { components } from "@/api-types";
+import NameEdit from './NameEdit';
+import IngredientFields from './IngredientFields';
+import SourceEdit from './SourceEdit';
+import UnitEdit from './UnitEdit';
+import NutritionEdit from './NutritionEdit';
+import TagEdit from './TagEdit';
+import { useIngredientForm } from './useIngredientForm';
+import { useSessionStorageState } from '@/hooks/useSessionStorageState';
+import type { components } from '@/api-types';
 
-type IngredientRead = components["schemas"]["IngredientRead"];
+type IngredientRead = components['schemas']['IngredientRead'];
 
 type IngredientFormProps = {
   ingredientToEditData?: IngredientRead | null;
 };
 
 function IngredientForm({ ingredientToEditData }: IngredientFormProps) {
-  const [isOpen, setIsOpen] = useSessionStorageState("ingredient-form-open", false);
+  const [isOpen, setIsOpen] = useSessionStorageState('ingredient-form-open', false);
   const [openConfirmationDialog, setOpenConfirmationDialog] = useState(false);
   const isInitialRenderRef = useRef(true);
   const previousIsOpenRef = useRef(isOpen);
-  const [isEditMode, setIsEditMode] = useSessionStorageState("ingredient-form-edit-mode", false);
+  const [isEditMode, setIsEditMode] = useSessionStorageState('ingredient-form-edit-mode', false);
 
   const {
     ingredient,
+    error,
+    copyForEditing,
     dispatch,
     needsClearForm,
     needsFillForm,
@@ -45,7 +58,7 @@ function IngredientForm({ ingredientToEditData }: IngredientFormProps) {
 
   const handleIngredientAction = useCallback(() => {
     save({
-      mode: isEditMode ? "edit" : "add",
+      mode: isEditMode ? 'edit' : 'add',
       onSaved: () => {
         if (!isEditMode) {
           setIsEditMode(false);
@@ -100,43 +113,88 @@ function IngredientForm({ ingredientToEditData }: IngredientFormProps) {
   return (
     <div>
       <Paper>
-        <Box sx={{ display: "flex", justifyContent: "center" }}>
-          <Button onClick={() => setIsOpen((prev) => !prev)}>{isOpen ? "Close" : "Add Ingredient"}</Button>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <Button onClick={() => setIsOpen((prev) => !prev)}>
+            {isOpen ? 'Close' : 'Add Ingredient'}
+          </Button>
         </Box>
         <Collapse in={isOpen}>
           <>
-            <NameEdit ingredient={ingredient} dispatch={dispatch} needsClearForm={needsClearForm} />
-            <SourceEdit ingredient={ingredient} dispatch={dispatch} applyUsdaResult={applyUsdaResult} />
-            <UnitEdit ingredient={ingredient} dispatch={dispatch} needsClearForm={needsClearForm} />
-            <NutritionEdit
-              ingredient={ingredient}
-              dispatch={dispatch}
-              needsClearForm={needsClearForm}
-              needsFillForm={needsFillForm}
-            />
-            <TagEdit ingredient={ingredient} dispatch={dispatch} needsClearForm={needsClearForm} />
+            {error && <Alert severity="error">{error}</Alert>}
+            {ingredient.is_shared && (
+              <Alert severity="info">
+                USDA ingredients are read-only. Make a personal copy to edit.
+              </Alert>
+            )}
+            <IngredientFields
+              readOnly={Boolean(ingredient.is_shared || ingredient.source === 'usda')}
+            >
+              <NameEdit
+                ingredient={ingredient}
+                dispatch={dispatch}
+                needsClearForm={needsClearForm}
+              />
+            </IngredientFields>
+            <IngredientFields readOnly={Boolean(ingredient.is_shared)}>
+              <SourceEdit
+                ingredient={ingredient}
+                dispatch={dispatch}
+                applyUsdaResult={applyUsdaResult}
+              />
+            </IngredientFields>
+            <IngredientFields
+              readOnly={Boolean(ingredient.is_shared || ingredient.source === 'usda')}
+            >
+              <UnitEdit
+                ingredient={ingredient}
+                dispatch={dispatch}
+                needsClearForm={needsClearForm}
+              />
+              <NutritionEdit
+                ingredient={ingredient}
+                dispatch={dispatch}
+                needsClearForm={needsClearForm}
+                needsFillForm={needsFillForm}
+              />
+              <TagEdit
+                ingredient={ingredient}
+                dispatch={dispatch}
+                needsClearForm={needsClearForm}
+              />
+            </IngredientFields>
+            {ingredient.is_shared && (
+              <Button onClick={copyForEditing}>Make a personal copy to edit</Button>
+            )}
 
             <Button onClick={handleClearForm}>Clear</Button>
-            <Button onClick={handleIngredientAction}>
-              {isEditMode ? "Update" : "Add"}
+            <Button disabled={Boolean(ingredient.is_shared)} onClick={handleIngredientAction}>
+              {isEditMode ? 'Update' : 'Add'}
             </Button>
             {isEditMode && (
-              <Button onClick={() => setOpenConfirmationDialog(true)}>Delete</Button>
+              <Button onClick={() => setOpenConfirmationDialog(true)}>
+                {ingredient.is_shared ? 'Remove from my ingredients' : 'Delete'}
+              </Button>
             )}
           </>
         </Collapse>
       </Paper>
 
-      <Dialog
-        open={openConfirmationDialog}
-        onClose={() => setOpenConfirmationDialog(false)}>
-        <DialogTitle>Delete Ingredient</DialogTitle>
+      <Dialog open={openConfirmationDialog} onClose={() => setOpenConfirmationDialog(false)}>
+        <DialogTitle>
+          {ingredient.is_shared ? 'Remove Ingredient' : 'Delete Ingredient'}
+        </DialogTitle>
         <DialogContent>
-          <div>Are you sure you want to delete this ingredient?</div>
+          <div>
+            {ingredient.is_shared
+              ? 'Remove this USDA ingredient from your ingredients?'
+              : 'Are you sure you want to delete this ingredient?'}
+          </div>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenConfirmationDialog(false)}>Cancel</Button>
-          <Button onClick={handleIngredientDelete}>Delete</Button>
+          <Button onClick={handleIngredientDelete}>
+            {ingredient.is_shared ? 'Remove' : 'Delete'}
+          </Button>
         </DialogActions>
       </Dialog>
     </div>

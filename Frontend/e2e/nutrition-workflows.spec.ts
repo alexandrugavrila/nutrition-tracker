@@ -3,68 +3,11 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const runId = `${Date.now()}`;
 
 const manualIngredientName = `E2E Manual Ingredient ${runId}`;
-const usdaIngredientName = `E2E USDA Ingredient ${runId}`;
+const usdaIngredientName = "E2E USDA Ingredient";
 const foodName = `E2E Food ${runId}`;
 const planName = `E2E Plan ${runId}`;
 
-const USDA_FDC_ID = 424242;
 const USDA_DEFAULT_UNIT_NAME = "medium";
-
-const usdaSearchResponse = {
-  foods: [
-    {
-      id: USDA_FDC_ID,
-      name: usdaIngredientName,
-      nutrition: {
-        calories: 1,
-        protein: 0.2,
-        carbohydrates: 0.3,
-        fat: 0.05,
-        fiber: 0.1,
-      },
-      normalization: {
-        data_type: "Foundation",
-        source_basis: "per_100g",
-        normalized_basis: "per_g",
-        can_normalize: true,
-        reason: null,
-        serving_size: 50,
-        serving_size_unit: "g",
-        household_serving_full_text: USDA_DEFAULT_UNIT_NAME,
-      },
-      units: [
-        { id: null, name: "1 g", grams: 1, is_default: false },
-        { id: "medium", name: USDA_DEFAULT_UNIT_NAME, grams: 50, is_default: true },
-      ],
-    },
-  ],
-};
-
-const usdaDetailResponse = {
-  id: USDA_FDC_ID,
-  name: usdaIngredientName,
-  nutrition: {
-    calories: 1,
-    protein: 0.2,
-    carbohydrates: 0.3,
-    fat: 0.05,
-    fiber: 0.1,
-  },
-  normalization: {
-    data_type: "Foundation",
-    source_basis: "per_100g",
-    normalized_basis: "per_g",
-    can_normalize: true,
-    reason: null,
-    serving_size: 50,
-    serving_size_unit: "g",
-    household_serving_full_text: USDA_DEFAULT_UNIT_NAME,
-  },
-  units: [
-    { id: null, name: "1 g", grams: 1, is_default: false },
-    { id: "medium", name: USDA_DEFAULT_UNIT_NAME, grams: 50, is_default: true },
-  ],
-};
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -88,24 +31,6 @@ const roundForUi = (value: number): string => {
   const rounded = Number.parseFloat(value.toPrecision(3));
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 };
-
-async function installUsdaMocks(page: Page): Promise<void> {
-  await page.route("**/api/usda/search?**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(usdaSearchResponse),
-    });
-  });
-
-  await page.route(`**/api/usda/foods/${USDA_FDC_ID}`, async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(usdaDetailResponse),
-    });
-  });
-}
 
 async function gotoDataTab(page: Page, tabName: "Foods" | "Ingredients"): Promise<void> {
   await page.goto("/data");
@@ -161,7 +86,6 @@ async function addManualIngredient(page: Page): Promise<void> {
 }
 
 async function addUsdaIngredient(page: Page): Promise<void> {
-  await installUsdaMocks(page);
   await gotoDataTab(page, "Ingredients");
 
   await page.getByRole("button", { name: /^Add Ingredient$/ }).click();
@@ -176,11 +100,6 @@ async function addUsdaIngredient(page: Page): Promise<void> {
   await expect(dialog.getByText(/USDA-sourced nutrition is read-only/i)).toBeVisible();
 
   await expect(getPreferredShoppingUnit(dialog)).toContainText(USDA_DEFAULT_UNIT_NAME);
-  await chooseOption(getPreferredShoppingUnit(dialog), page, "g");
-  await expect(dialog.getByLabel("Calories")).toHaveValue("1");
-  await expect(dialog.getByLabel("Protein")).toHaveValue("0.2");
-
-  await chooseOption(getPreferredShoppingUnit(dialog), page, USDA_DEFAULT_UNIT_NAME);
   await expect(dialog.getByLabel("Calories")).toHaveValue("50");
 
   await dialog.getByRole("button", { name: "add ingredient", exact: true }).click();
@@ -253,6 +172,14 @@ async function fetchFood(page: Page): Promise<{ ingredients: Array<{ unit_quanti
 
 test.describe.configure({ mode: "serial" });
 
+test.beforeEach(async ({ page }) => {
+  const email = process.env.E2E_EMAIL;
+  const password = process.env.E2E_PASSWORD;
+  if (!email || !password) throw new Error("E2E_EMAIL and E2E_PASSWORD are required");
+  const response = await page.request.post("/api/auth/login", { headers: { Origin: new URL(process.env.PLAYWRIGHT_BASE_URL!).origin }, data: { email, password } });
+  expect(response.status()).toBe(200);
+});
+
 test("creates a manual ingredient with units and a preferred shopping unit", async ({ page }) => {
   await addManualIngredient(page);
 
@@ -270,9 +197,18 @@ test("imports a USDA ingredient and reloads the saved default unit and per-gram 
   await expect(dialog.getByLabel("Source")).toContainText("USDA");
   await expect(getPreferredShoppingUnit(dialog)).toContainText(USDA_DEFAULT_UNIT_NAME);
 
+  await expect(dialog.getByRole("button", { name: "update ingredient", exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("Name")).toBeDisabled();
+  await dialog.getByRole("button", { name: "Make a personal copy to edit" }).click();
+  await expect(dialog.getByLabel("Name")).toBeEnabled();
   await chooseOption(getPreferredShoppingUnit(dialog), page, "g");
   await expect(dialog.getByLabel("Calories")).toHaveValue("1");
   await expect(dialog.getByLabel("Protein")).toHaveValue("0.2");
+  await dialog.getByLabel("Name").fill("E2E Personal USDA Copy");
+  await dialog.getByRole("button", { name: "update ingredient", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const original = await reopenIngredient(page, usdaIngredientName);
+  await expect(original.getByLabel("Name")).toBeDisabled();
 });
 
 test("creates a food with recipe yield normalization and reloads persisted ingredient quantities", async ({ page }) => {
@@ -361,4 +297,54 @@ test("plans, shops, cooks, logs, and preserves daily totals after deleting the s
   await expect(fridgeRow).toHaveCount(0);
   await expect(dailyTotal.getByLabel("Total calories")).toHaveText("55");
   await expect(page.getByRole("row", { name: /Entry from .* 0\.5 55/ })).toBeVisible();
+});
+
+
+test("preserves unavailable nutrients from USDA through recipe, cooking and logging", async ({ page }) => {
+  const name = "E2E Incomplete USDA";
+  const recipeName = `Incomplete recipe ${runId}`;
+  await gotoDataTab(page, "Ingredients");
+  await page.getByRole("button", { name: /^Add Ingredient$/ }).click();
+  const dialog = getTitledDialog(page, "Add Ingredient");
+  await chooseOption(dialog.getByLabel("Source"), page, "USDA");
+  await dialog.getByLabel("Search USDA").fill("incomplete");
+  await dialog.getByRole("button", { name: "Search" }).click();
+  await expect(dialog.getByRole("button", { name: new RegExp(name) })).toContainText("Unavailable");
+  await dialog.getByRole("button", { name: new RegExp(name) }).click();
+  await expect(dialog.getByLabel("Fiber")).toHaveValue("");
+  await expect(dialog.getByLabel("Fat")).toHaveValue("0");
+  await dialog.getByRole("button", { name: "add ingredient", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const ingredientRow = await searchIngredient(page, name);
+  await expect(ingredientRow).toContainText("Unavailable");
+  const ingredients = await (await page.request.get("/api/ingredients/")).json();
+  const ingredient = ingredients.find((item) => item.name === name);
+  const gram = ingredient.units.find((unit) => unit.grams === 1);
+  const response = await page.request.post("/api/foods/", {
+    headers: { Origin: new URL(process.env.PLAYWRIGHT_BASE_URL!).origin },
+    data: { name: recipeName, ingredients: [{ ingredient_id: ingredient.id, unit_id: gram.id, unit_quantity: 50 }] },
+  });
+  expect(response.status()).toBe(201);
+  await page.goto("/planning");
+  await page.getByRole("button", { name: "Add Food" }).click();
+  const foods = getTableDialog(page, "Foods");
+  await foods.getByLabel("Search by name").fill(recipeName);
+  await foods.getByRole("button", { name: `Select food ${recipeName}` }).click();
+  await expect(page.getByRole("row", { name: /Total Overall/ })).toContainText("Unavailable");
+  await navigateWithDrawer(page, "Cooking");
+  const cooked = page.getByRole("row", { name: new RegExp(recipeName) });
+  await expect(cooked).toContainText("Unavailable");
+  await cooked.getByRole("button", { name: "Mark complete", exact: true }).click();
+  const batches = await (await page.request.get("/api/stored_food/")).json();
+  const batch = batches.find((item) => item.label === recipeName);
+  expect(batch.per_portion_fiber).toBeNull();
+  expect(batch.per_portion_fat).toBe(0);
+  await navigateWithDrawer(page, "Logging");
+  const fridgeRow = page.getByRole("table").filter({ has: page.getByRole("columnheader", { name: "Remaining portions" }) })
+    .getByRole("row", { name: new RegExp(recipeName) });
+  await fridgeRow.getByRole("button", { name: "Add to log", exact: true }).click();
+  const dailyTotal = page.getByRole("group", { name: /Daily Total/i });
+  await expect(dailyTotal.getByLabel("Total fiber")).toHaveText("Unavailable");
+  await page.reload();
+  await expect(page.getByRole("group", { name: /Daily Total/i }).getByLabel("Total fiber")).toHaveText("Unavailable");
 });

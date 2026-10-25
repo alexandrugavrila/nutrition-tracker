@@ -10,13 +10,21 @@ class Nutrition(SQLModel, table=True):
     __tablename__ = "nutrition"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    ingredient_id: Optional[int] = Field(
-        default=None, foreign_key="ingredients.id", nullable=False
+    ingredient_id: Optional[int] = Field(default=None, foreign_key="ingredients.id", nullable=False)
+    calories: float | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=True)
     )
-    calories: float = Field(sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=False))
-    fat: float = Field(sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=False))
-    carbohydrates: float = Field(sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=False))
-    protein: float = Field(sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=False))
-    fiber: float = Field(sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=False))
+    fat: float | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=True)
+    )
+    carbohydrates: float | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=True)
+    )
+    protein: float | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=True)
+    )
+    fiber: float | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4, asdecimal=False), nullable=True)
+    )
 
     ingredient: Optional["Ingredient"] = Relationship(back_populates="nutrition")

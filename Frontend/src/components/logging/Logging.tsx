@@ -29,7 +29,7 @@ import {
 import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 
-import apiClient from "@/apiClient";
+import { useAccountClient } from "@/contexts/AccountScope";
 import { useData } from "@/contexts/DataContext";
 import type { CookedBatch } from "@/api-extra-types";
 import type { components } from "@/api-types";
@@ -40,6 +40,8 @@ import IngredientModal from "@/components/common/IngredientModal";
 import IngredientTable from "@/components/data/ingredient/IngredientTable";
 import FoodTable from "@/components/data/food/FoodTable";
 import {
+  parseNutrient,
+  scaleNutrient,
   createIngredientLookup,
   findIngredientInLookup,
   gramsForIngredientPortion,
@@ -67,11 +69,11 @@ type DailyLogEntry = {
   ingredient_id: number | null;
   food_id: number | null;
   portions_consumed: number;
-  calories: number;
-  protein: number;
-  carbohydrates: number;
-  fat: number;
-  fiber: number;
+  calories: number | null;
+  protein: number | null;
+  carbohydrates: number | null;
+  fat: number | null;
+  fiber: number | null;
   created_at: string;
 };
 
@@ -99,14 +101,12 @@ const formatIsoDate = (value: string): string => {
 };
 
 const computePortionMacros = (item: CookedBatch, portions: number): MacroTotals => ({
-  calories: item.per_portion_calories * portions,
-  protein: item.per_portion_protein * portions,
-  fat: item.per_portion_fat * portions,
-  carbs: item.per_portion_carbohydrates * portions,
-  fiber: item.per_portion_fiber * portions,
+  calories: scaleNutrient(item.per_portion_calories, portions),
+  protein: scaleNutrient(item.per_portion_protein, portions),
+  fat: scaleNutrient(item.per_portion_fat, portions),
+  carbs: scaleNutrient(item.per_portion_carbohydrates, portions),
+  fiber: scaleNutrient(item.per_portion_fiber, portions),
 });
-
-const DEFAULT_LOGGING_USER_ID = "demo-user";
 
 type IngredientLogFormState = {
   ingredientId: string;
@@ -120,6 +120,7 @@ type FoodLogFormState = {
 };
 
 function Logging() {
+  const apiClient = useAccountClient();
   const {
     fridgeInventory,
     foods,
@@ -205,11 +206,11 @@ function Logging() {
       ingredient_id: toNullableNumber(entry.ingredient_id),
       food_id: toNullableNumber(entry.food_id),
       portions_consumed: toNumber(entry.portions_consumed),
-      calories: toNumber(entry.calories),
-      protein: toNumber(entry.protein),
-      carbohydrates: toNumber(entry.carbohydrates),
-      fat: toNumber(entry.fat),
-      fiber: toNumber(entry.fiber),
+      calories: parseNutrient(entry.calories),
+      protein: parseNutrient(entry.protein),
+      carbohydrates: parseNutrient(entry.carbohydrates),
+      fat: parseNutrient(entry.fat),
+      fiber: parseNutrient(entry.fiber),
       created_at: toStringValue(entry.created_at),
     }),
     [toNumber, toNullableNumber, toStringValue],
@@ -229,11 +230,6 @@ function Logging() {
     });
     return map;
   }, [foods]);
-
-  const defaultUserId = useMemo(() => {
-    const candidate = fridgeInventory.find((item) => item.user_id)?.user_id;
-    return candidate ?? DEFAULT_LOGGING_USER_ID;
-  }, [fridgeInventory]);
 
   const selectedIngredient = useMemo(() => {
     if (!ingredientLog.ingredientId) {
@@ -522,7 +518,6 @@ function Logging() {
         const logRequest = apiClient.path("/api/logs/").method("post").create();
         const { data: rawLog } = (await logRequest({
           body: {
-            user_id: item.user_id,
             log_date: selectedDate,
             stored_food_id: item.id,
             portions_consumed: portions,
@@ -614,7 +609,6 @@ function Logging() {
       const request = apiClient.path("/api/logs/").method("post").create();
       const { data: rawLog } = (await request({
         body: {
-          user_id: defaultUserId,
           log_date: selectedDate,
           ingredient_id: selectedIngredient.id,
           stored_food_id: null,
@@ -654,7 +648,6 @@ function Logging() {
   }, [
     selectedIngredient,
     canSubmitIngredientLog,
-    defaultUserId,
     selectedDate,
     ingredientGrams,
     ingredientMacros,
@@ -691,7 +684,6 @@ function Logging() {
       const request = apiClient.path("/api/logs/").method("post").create();
       const { data: rawLog } = (await request({
         body: {
-          user_id: defaultUserId,
           log_date: selectedDate,
           food_id: selectedFood.id,
           stored_food_id: null,
@@ -729,7 +721,6 @@ function Logging() {
   }, [
     selectedFood,
     canSubmitFoodLog,
-    defaultUserId,
     selectedDate,
     foodPortionValue,
     foodLogMacros,

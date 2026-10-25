@@ -319,6 +319,5 @@ prod_wait_for_stack_ready() {
   http_port="$(prod_http_port)"
   echo "Running post-deploy HTTP checks on port $http_port..."
   prod_wait_for_http "http://127.0.0.1:${http_port}/healthz" 60
-  prod_wait_for_http "http://127.0.0.1:${http_port}/api/ingredients/" 60
-  prod_wait_for_http "http://127.0.0.1:${http_port}/api/foods/" 60
+  prod_wait_for_http "http://127.0.0.1:${http_port}/api/health/ready" 60
 }

@@ -5,7 +5,7 @@ from sqlmodel import Session
 from Backend.models import PossibleIngredientTag, PossibleFoodTag
 
 
-def test_full_ingredient_crud(client: TestClient, engine) -> None:
+def test_full_ingredient_crud(user_a_client: TestClient, engine) -> None:
     with Session(engine) as session:
         spicy = PossibleIngredientTag(name="Spicy")
         sweet = PossibleIngredientTag(name="Sweet")
@@ -31,7 +31,7 @@ def test_full_ingredient_crud(client: TestClient, engine) -> None:
         "tags": [{"id": spicy_id}, {"id": sweet_id}],
     }
 
-    response = client.post("/api/ingredients/", json=payload)
+    response = user_a_client.post("/api/ingredients/", json=payload)
     assert response.status_code == 201
     ingredient = response.json()
     ingredient_id = ingredient["id"]
@@ -39,7 +39,7 @@ def test_full_ingredient_crud(client: TestClient, engine) -> None:
     assert len(ingredient["units"]) == 3
     assert {t["name"] for t in ingredient["tags"]} == {"Spicy", "Sweet"}
 
-    response = client.get(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.get(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 200
     fetched = response.json()
     nutrition_id = fetched["nutrition"]["id"]
@@ -74,20 +74,20 @@ def test_full_ingredient_crud(client: TestClient, engine) -> None:
         "tags": [{"id": spicy_id}],
     }
 
-    response = client.put(f"/api/ingredients/{ingredient_id}", json=update_payload)
+    response = user_a_client.put(f"/api/ingredients/{ingredient_id}", json=update_payload)
     assert response.status_code == 200
     updated = response.json()
     assert updated["name"] == "Carrot Updated"
     assert updated["nutrition"]["calories"] == pytest.approx(50.0)
     assert len(updated["tags"]) == 1 and updated["tags"][0]["name"] == "Spicy"
 
-    response = client.delete(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.delete(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 200
-    response = client.get(f"/api/ingredients/{ingredient_id}")
+    response = user_a_client.get(f"/api/ingredients/{ingredient_id}")
     assert response.status_code == 404
 
 
-def test_full_food_crud(client: TestClient, engine) -> None:
+def test_full_food_crud(user_a_client: TestClient, engine) -> None:
     with Session(engine) as session:
         food_tag1 = PossibleFoodTag(name="Breakfast")
         food_tag2 = PossibleFoodTag(name="Healthy")
@@ -111,7 +111,7 @@ def test_full_food_crud(client: TestClient, engine) -> None:
         "tags": [{"id": ing_tag_id}],
     }
 
-    response = client.post("/api/ingredients/", json=ingredient_payload)
+    response = user_a_client.post("/api/ingredients/", json=ingredient_payload)
     assert response.status_code == 201
     ingredient = response.json()
     ingredient_id = ingredient["id"]
@@ -129,14 +129,14 @@ def test_full_food_crud(client: TestClient, engine) -> None:
         "tags": [{"id": food_tag1_id}, {"id": food_tag2_id}],
     }
 
-    response = client.post("/api/foods", json=food_payload)
+    response = user_a_client.post("/api/foods", json=food_payload)
     assert response.status_code == 201
     food = response.json()
     food_id = food["id"]
     assert food["ingredients"][0]["unit_quantity"] == pytest.approx(2.0)
     assert {t["name"] for t in food["tags"]} == {"Breakfast", "Healthy"}
 
-    response = client.get(f"/api/foods/{food_id}")
+    response = user_a_client.get(f"/api/foods/{food_id}")
     assert response.status_code == 200
     fetched = response.json()
 
@@ -154,14 +154,14 @@ def test_full_food_crud(client: TestClient, engine) -> None:
         "tags": [{"id": food_tag1_id}],
     }
 
-    response = client.put(f"/api/foods/{food_id}", json=update_payload)
+    response = user_a_client.put(f"/api/foods/{food_id}", json=update_payload)
     assert response.status_code == 200
     updated = response.json()
     assert updated["name"] == "Onion Omelette Deluxe"
     assert updated["ingredients"][0]["unit_quantity"] == pytest.approx(3.0)
     assert len(updated["tags"]) == 1 and updated["tags"][0]["name"] == "Breakfast"
 
-    response = client.delete(f"/api/foods/{food_id}")
+    response = user_a_client.delete(f"/api/foods/{food_id}")
     assert response.status_code == 200
-    response = client.get(f"/api/foods/{food_id}")
+    response = user_a_client.get(f"/api/foods/{food_id}")
     assert response.status_code == 404

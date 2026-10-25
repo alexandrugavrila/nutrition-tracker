@@ -7,6 +7,8 @@ import type { FoodRead, IngredientRead } from "@/utils/nutrition";
 const buildIngredient = (
   overrides: Partial<IngredientRead> & { id: number; name: string },
 ): IngredientRead => ({
+  is_shared: false,
+  provenance_status: "unverified",
   nutrition: null,
   tags: [],
   units: [],

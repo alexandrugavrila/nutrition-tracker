@@ -22,7 +22,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import RemoveIcon from "@mui/icons-material/Remove";
 
-import apiClient from "@/apiClient";
+import { useAccountClient } from "@/contexts/AccountScope";
 import type { StoredFoodCreate } from "@/api-extra-types";
 import FeedbackSnackbar, {
   SnackbarMessage,
@@ -38,6 +38,8 @@ import type {
   PlanItem,
 } from "@/utils/planningTypes";
 import {
+  scaleNutrient,
+  UNKNOWN_MACROS,
   ZERO_MACROS,
   addMacroTotals,
   createIngredientLookup,
@@ -96,11 +98,11 @@ const divideMacroTotals = (totals: MacroTotals, divisor: number): MacroTotals =>
   }
 
   return {
-    calories: totals.calories / divisor,
-    protein: totals.protein / divisor,
-    carbs: totals.carbs / divisor,
-    fat: totals.fat / divisor,
-    fiber: totals.fiber / divisor,
+    calories: scaleNutrient(totals.calories, 1 / divisor),
+    protein: scaleNutrient(totals.protein, 1 / divisor),
+    carbs: scaleNutrient(totals.carbs, 1 / divisor),
+    fat: scaleNutrient(totals.fat, 1 / divisor),
+    fiber: scaleNutrient(totals.fiber, 1 / divisor),
   };
 };
 
@@ -110,8 +112,6 @@ const planItemKey = (item: PlanItem, index: number): string => {
   }
   return `ingredient:${index}:${String(item.ingredientId ?? "")}`;
 };
-
-const DEFAULT_COOKING_USER_ID = "demo-user";
 
 const foodIngredientKey = (
   planIndex: number,
@@ -355,6 +355,7 @@ const pluralize = (value: number, noun: string): string => {
 };
 
 function Cooking() {
+  const apiClient = useAccountClient();
   const { foods, ingredients, setFridgeNeedsRefetch } = useData();
   const foodLookup = useMemo(() => {
     const map = new Map<string, FoodRead>();
@@ -747,7 +748,7 @@ function Cooking() {
     (item: FoodPlanItem, index: number): MacroTotals => {
       const food = foodLookup.get(String(item.foodId ?? ""));
       if (!food || !Array.isArray(food.ingredients)) {
-        return { ...ZERO_MACROS };
+        return { ...UNKNOWN_MACROS };
       }
 
       const portionKey = planItemKey(item, index);
@@ -771,7 +772,7 @@ function Cooking() {
           ingredient.ingredient_id,
         );
         if (!dataIngredient) {
-          return totals;
+          return addMacroTotals(totals, UNKNOWN_MACROS);
         }
         const key = foodIngredientKey(index, ingredient.ingredient_id);
         const override = item.overrides[String(ingredient.ingredient_id)];
@@ -807,7 +808,7 @@ function Cooking() {
             ingredientId,
           );
           if (!dataIngredient) {
-            return totals;
+            return addMacroTotals(totals, UNKNOWN_MACROS);
           }
           const addedKey = addedFoodIngredientKey(index, ingredientId);
           const defaultUnitId = resolveDefaultIngredientUnitId(dataIngredient);
@@ -884,11 +885,11 @@ function Cooking() {
   const normalizedDays = Number.isFinite(days) && days > 0 ? days : 1;
   const perDayActualMacros = useMemo<MacroTotals>(
     () => ({
-      calories: totalActualMacros.calories / normalizedDays,
-      protein: totalActualMacros.protein / normalizedDays,
-      carbs: totalActualMacros.carbs / normalizedDays,
-      fat: totalActualMacros.fat / normalizedDays,
-      fiber: totalActualMacros.fiber / normalizedDays,
+      calories: scaleNutrient(totalActualMacros.calories, 1 / normalizedDays),
+      protein: scaleNutrient(totalActualMacros.protein, 1 / normalizedDays),
+      carbs: scaleNutrient(totalActualMacros.carbs, 1 / normalizedDays),
+      fat: scaleNutrient(totalActualMacros.fat, 1 / normalizedDays),
+      fiber: scaleNutrient(totalActualMacros.fiber, 1 / normalizedDays),
     }),
     [normalizedDays, totalActualMacros],
   );
@@ -942,16 +943,15 @@ function Cooking() {
 
         const payload: StoredFoodCreate = {
           label: food.name ?? null,
-          user_id: DEFAULT_COOKING_USER_ID,
           food_id: numericFoodId,
           ingredient_id: null,
           prepared_portions: actualPortions,
           remaining_portions: actualPortions,
-          per_portion_calories: roundDisplayValue(perPortionMacros.calories),
-          per_portion_protein: roundDisplayValue(perPortionMacros.protein),
-          per_portion_carbohydrates: roundDisplayValue(perPortionMacros.carbs),
-          per_portion_fat: roundDisplayValue(perPortionMacros.fat),
-          per_portion_fiber: roundDisplayValue(perPortionMacros.fiber),
+          per_portion_calories: (perPortionMacros.calories == null ? null : roundDisplayValue(perPortionMacros.calories)),
+          per_portion_protein: (perPortionMacros.protein == null ? null : roundDisplayValue(perPortionMacros.protein)),
+          per_portion_carbohydrates: (perPortionMacros.carbs == null ? null : roundDisplayValue(perPortionMacros.carbs)),
+          per_portion_fat: (perPortionMacros.fat == null ? null : roundDisplayValue(perPortionMacros.fat)),
+          per_portion_fiber: (perPortionMacros.fiber == null ? null : roundDisplayValue(perPortionMacros.fiber)),
         };
 
         return payload;
@@ -1038,16 +1038,15 @@ function Cooking() {
 
         const payload: StoredFoodCreate = {
           label,
-          user_id: DEFAULT_COOKING_USER_ID,
           food_id: null,
           ingredient_id: numericIngredientId,
           prepared_portions: normalizedPortions,
           remaining_portions: normalizedPortions,
-          per_portion_calories: roundDisplayValue(perPortionMacros.calories),
-          per_portion_protein: roundDisplayValue(perPortionMacros.protein),
-          per_portion_carbohydrates: roundDisplayValue(perPortionMacros.carbs),
-          per_portion_fat: roundDisplayValue(perPortionMacros.fat),
-          per_portion_fiber: roundDisplayValue(perPortionMacros.fiber),
+          per_portion_calories: (perPortionMacros.calories == null ? null : roundDisplayValue(perPortionMacros.calories)),
+          per_portion_protein: (perPortionMacros.protein == null ? null : roundDisplayValue(perPortionMacros.protein)),
+          per_portion_carbohydrates: (perPortionMacros.carbs == null ? null : roundDisplayValue(perPortionMacros.carbs)),
+          per_portion_fat: (perPortionMacros.fat == null ? null : roundDisplayValue(perPortionMacros.fat)),
+          per_portion_fiber: (perPortionMacros.fiber == null ? null : roundDisplayValue(perPortionMacros.fiber)),
         };
 
         return payload;

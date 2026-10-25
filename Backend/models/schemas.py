@@ -1,5 +1,6 @@
+import math
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import ConfigDict, model_validator
 from sqlmodel import SQLModel, Field
@@ -14,11 +15,13 @@ from .possible_food_tag import PossibleFoodTag
 class NutritionCreate(SQLModel):
     """Schema for creating nutrition data."""
 
-    calories: float
-    fat: float
-    carbohydrates: float
-    protein: float
-    fiber: float
+    model_config = ConfigDict(allow_inf_nan=False)
+
+    calories: float | None = Field(default=None, ge=0)
+    fat: float | None = Field(default=None, ge=0)
+    carbohydrates: float | None = Field(default=None, ge=0)
+    protein: float | None = Field(default=None, ge=0)
+    fiber: float | None = Field(default=None, ge=0)
 
 
 class IngredientUnitCreate(SQLModel):
@@ -61,6 +64,35 @@ class TagRef(SQLModel):
 class IngredientCreate(SQLModel):
     """Schema for creating an ingredient."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_catalog_claims(cls, value):
+        if isinstance(value, dict):
+            protected = {
+                "is_shared",
+                "verification_status",
+                "provenance_status",
+                "artifact_sha256",
+                "import_run_id",
+                "user_id",
+                "sources",
+                "verified_at",
+                "normalization_version",
+                "payload_hash",
+                "last_synced_at",
+                "is_stale",
+                "owner_user_id",
+            }
+            if (
+                protected.intersection(value)
+                or value.get("source") not in (None, "", "manual")
+                or value.get("source_id") not in (None, "")
+            ):
+                raise ValueError(
+                    "Provider provenance and ownership are server-managed; use USDA import or a personal copy."
+                )
+        return value
+
     name: str
     source: Optional[str] = None
     source_id: Optional[str] = None
@@ -73,6 +105,35 @@ class IngredientCreate(SQLModel):
 
 class IngredientUpdate(SQLModel):
     """Schema for updating an ingredient."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_catalog_claims(cls, value):
+        if isinstance(value, dict):
+            protected = {
+                "is_shared",
+                "verification_status",
+                "provenance_status",
+                "artifact_sha256",
+                "import_run_id",
+                "user_id",
+                "sources",
+                "verified_at",
+                "normalization_version",
+                "payload_hash",
+                "last_synced_at",
+                "is_stale",
+                "owner_user_id",
+            }
+            if (
+                protected.intersection(value)
+                or value.get("source") not in (None, "", "manual")
+                or value.get("source_id") not in (None, "")
+            ):
+                raise ValueError(
+                    "Provider provenance and ownership are server-managed; use USDA import or a personal copy."
+                )
+        return value
 
     name: str
     source: Optional[str] = None
@@ -91,6 +152,9 @@ class IngredientRead(SQLModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    user_id: Optional[str] = None
+    is_shared: bool = False
+    provenance_status: Literal["unverified", "verified", "rejected"] = "unverified"
     name: str
     source: Optional[str] = None
     source_id: Optional[str] = None
@@ -121,6 +185,7 @@ class FoodRead(SQLModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    user_id: Optional[str] = None
     name: str
     ingredients: List[FoodIngredient] = Field(default_factory=list)
     tags: List[PossibleFoodTag] = Field(default_factory=list)
@@ -146,25 +211,70 @@ class PlanRead(SQLModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    user_id: Optional[str] = None
     label: str
     payload: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
 
+class LoginRequest(SQLModel):
+    """Credentials required to create a session."""
+
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class UserCreate(SQLModel):
+    """Payload for an admin-created user account."""
+
+    email: str
+    password: str = Field(min_length=1, max_length=1024)
+    display_name: str
+    is_admin: bool = False
+
+
+class UserRead(SQLModel):
+    """Safe user representation returned to clients."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: str
+    display_name: str
+    is_active: bool
+    is_admin: bool
+    last_login_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChangePasswordRequest(SQLModel):
+    """Payload for changing the current user's password."""
+
+    current_password: str
+    new_password: str = Field(min_length=1, max_length=1024)
+
+
+class AuthStatus(SQLModel):
+    """Current authentication state returned by auth endpoints."""
+
+    authenticated: bool
+    user: Optional[UserRead] = None
+
+
 class StoredFoodBase(SQLModel):
     """Common fields shared by stored food payloads."""
 
     label: Optional[str] = None
-    user_id: str
     food_id: Optional[int] = None
     ingredient_id: Optional[int] = None
     prepared_portions: float
-    per_portion_calories: float
-    per_portion_protein: float
-    per_portion_carbohydrates: float
-    per_portion_fat: float
-    per_portion_fiber: float
+    per_portion_calories: float | None = Field(default=None, ge=0)
+    per_portion_protein: float | None = Field(default=None, ge=0)
+    per_portion_carbohydrates: float | None = Field(default=None, ge=0)
+    per_portion_fat: float | None = Field(default=None, ge=0)
+    per_portion_fiber: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_source(self) -> "StoredFoodBase":
@@ -182,7 +292,7 @@ class StoredFoodBase(SQLModel):
             "per_portion_fiber": self.per_portion_fiber,
         }
         for field, value in numeric_fields.items():
-            if value < 0:
+            if value is not None and (not math.isfinite(value) or value < 0):
                 raise ValueError(f"{field} cannot be negative")
         return self
 
@@ -200,6 +310,8 @@ class StoredFoodRead(StoredFoodBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    owner_user_id: Optional[str] = None
+    user_id: str
     remaining_portions: float
     is_finished: bool
     prepared_at: datetime
@@ -216,17 +328,16 @@ class StoredFoodConsume(SQLModel):
 class DailyLogEntryBase(SQLModel):
     """Shared fields for daily log entry payloads."""
 
-    user_id: str
     log_date: date
     stored_food_id: Optional[int] = None
     ingredient_id: Optional[int] = None
     food_id: Optional[int] = None
     portions_consumed: float
-    calories: float
-    protein: float
-    carbohydrates: float
-    fat: float
-    fiber: float
+    calories: float | None = Field(default=None, ge=0)
+    protein: float | None = Field(default=None, ge=0)
+    carbohydrates: float | None = Field(default=None, ge=0)
+    fat: float | None = Field(default=None, ge=0)
+    fiber: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_source(self) -> "DailyLogEntryBase":
@@ -252,7 +363,7 @@ class DailyLogEntryBase(SQLModel):
             "fiber": self.fiber,
         }
         for field, value in macro_fields.items():
-            if value < 0:
+            if value is not None and (not math.isfinite(value) or value < 0):
                 raise ValueError(f"{field} cannot be negative")
         return self
 
@@ -269,6 +380,8 @@ class DailyLogEntryRead(DailyLogEntryBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    owner_user_id: Optional[str] = None
+    user_id: str
     created_at: datetime
 
 
@@ -287,6 +400,11 @@ __all__ = [
     "PlanCreate",
     "PlanUpdate",
     "PlanRead",
+    "LoginRequest",
+    "UserCreate",
+    "UserRead",
+    "ChangePasswordRequest",
+    "AuthStatus",
     "StoredFoodCreate",
     "StoredFoodRead",
     "StoredFoodConsume",

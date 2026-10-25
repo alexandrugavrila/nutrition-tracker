@@ -3,7 +3,8 @@
 
 type HTTPMethod = "get" | "post" | "put" | "patch" | "delete";
 
-class ApiClient {
+export class ApiClient {
+  constructor(private request: typeof fetch = (...args) => fetch(...args)) {}
   private baseUrl = "";
 
   configure({ baseUrl }: { baseUrl: string }) {
@@ -17,8 +18,9 @@ class ApiClient {
         create: () =>
           async (options: { body?: unknown } = {}) => {
             const { body } = options;
-            const response = await fetch(url, {
+            const response = await this.request(url, {
               method: method.toUpperCase(),
+              credentials: "include",
               headers: body
                 ? { "Content-Type": "application/json" }
                 : undefined,
@@ -35,7 +37,10 @@ class ApiClient {
                 const text = await response.text();
                 parsed = text.length ? text : null;
               }
-            } catch {
+            } catch (error) {
+              // DOMException is not an Error in every browser realm. Only malformed
+              // JSON may be ignored; cancellation and other read failures must escape.
+              if (!error || typeof error !== "object" || !("name" in error) || error.name !== "SyntaxError") throw error;
               // Ignore JSON parse errors for empty/error responses
               parsed = null;
             }

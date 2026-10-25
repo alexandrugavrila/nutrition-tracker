@@ -13,24 +13,24 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: nutrition
+          POSTGRES_DB: nutrition_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d nutrition"
+          --health-cmd "pg_isready -U postgres -d nutrition_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
       PYTHONPATH: ${{ github.workspace }}
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nutrition
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nutrition_test
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         id: setup-python
         with:
           python-version: '3.11'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
       - name: Cache backend dependencies
@@ -72,9 +72,16 @@ jobs:
         run: |
           git diff --exit-code Backend/openapi.json Frontend/src/api-types.ts
       - name: Backend tests
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nutrition_test
+          TEST_DATABASE_CONFIRM: nutrition_test
         run: |
           source scripts/env/activate-venv.sh
-          pytest
+          pytest -m "not e2e"
+      - name: Rehearse populated pre-adoption upgrades
+        run: |
+          source scripts/env/activate-venv.sh
+          python -m testsupport.run_schema_expansion
       - name: Teardown database
         if: always()
         run: |
@@ -92,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         id: setup-node
         with:
           node-version: '20'
@@ -122,33 +129,6 @@ jobs:
       - name: Production build
         working-directory: Frontend
         run: npm run build
-
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: nutrition-housekeeping-ci-validation
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          path: nutrition-housekeeping-ci-validation
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Prepare isolated validation checkout
-        run: |
-          git switch -c housekeeping/ci-validation
-          source scripts/env/activate-venv.sh
-          npm --prefix Frontend exec -- playwright install --with-deps chromium
-      - name: API and browser end-to-end tests
-        run: bash scripts/tests/run-e2e-tests.sh
-      - name: Teardown test stack
-        if: always()
-        run: bash scripts/docker/compose.sh down type -test
 
   production-smoke:
     runs-on: ubuntu-latest
@@ -221,6 +201,8 @@ jobs:
           cat /tmp/backend-ready.json
           grep -q '"status":"ready"' /tmp/backend-ready.json
           grep -q '"dependencies":"database"' /tmp/backend-ready.json
+      - name: Verify packaged account operations on a disposable database
+        run: python3 -m testsupport.run_account_commands_smoke
       - name: Show production compose status
         if: always()
         run: |
@@ -234,3 +216,52 @@ jobs:
         run: |
           docker compose --env-file .env.production -f docker-compose.prod.yml down -v --remove-orphans
 
+
+  authenticated-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: python -m pip install -r Backend/requirements.txt
+      - run: npm --prefix Frontend ci
+      - run: npx --prefix Frontend playwright install --with-deps chromium
+      - name: Required authenticated API and browser validation
+        run: python -m testsupport.run_e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: authenticated-e2e-results
+          path: |
+            Frontend/playwright-report
+            Frontend/test-results
+
+  release-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm --prefix Frontend ci
+      - run: npx --prefix Frontend playwright install --with-deps chromium
+      - name: Production-image populated cutover, restored backup and HTTPS browser
+        run: python -m testsupport.run_release_cutover > release-cutover.log 2>&1
+      - name: Explicit private HTTP production-image browser and cutover
+        run: python -m testsupport.run_release_cutover --transport http > release-cutover-http.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-cutover-evidence
+          path: |
+            release-cutover.log
+            release-cutover-http.log

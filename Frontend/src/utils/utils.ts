@@ -1,7 +1,10 @@
 /**
  * Format a numeric value to three significant digits.
  */
-export const formatCellNumber = (value: number): number => {
+export function formatCellNumber(value: number): number;
+export function formatCellNumber(value: number | null | undefined): number | string;
+export function formatCellNumber(value: number | null | undefined): number | string {
+  if (value == null || !Number.isFinite(value)) return "Unavailable";
   return parseFloat(parseFloat(String(value)).toPrecision(3));
 };
 
@@ -44,9 +47,10 @@ export const handleFetchRequest = async (
   url: string,
   method: string,
   data: unknown,
+  request: typeof fetch,
 ): Promise<void> => {
   const endpoint = url;
-  const response = await fetch(endpoint, {
+  const response = await request(endpoint, {
     method,
     headers: {
       'Content-Type': 'application/json',

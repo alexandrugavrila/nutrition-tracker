@@ -5,15 +5,15 @@ from fastapi.testclient import TestClient
 from Backend.routes import health
 
 
-def test_liveness_endpoint_reports_live_status(client: TestClient) -> None:
-    response = client.get("/api/health/live")
+def test_liveness_endpoint_reports_live_status(anonymous_client: TestClient) -> None:
+    response = anonymous_client.get("/api/health/live")
 
     assert response.status_code == 200
     assert response.json() == {"status": "live"}
 
 
-def test_readiness_endpoint_reports_database_dependency(client: TestClient) -> None:
-    response = client.get("/api/health/ready")
+def test_readiness_endpoint_reports_database_dependency(anonymous_client: TestClient) -> None:
+    response = anonymous_client.get("/api/health/ready")
 
     assert response.status_code == 200
     payload = response.json()
@@ -23,7 +23,7 @@ def test_readiness_endpoint_reports_database_dependency(client: TestClient) -> N
 
 
 def test_readiness_endpoint_returns_503_when_database_is_unavailable(
-    client: TestClient, monkeypatch
+    anonymous_client: TestClient, monkeypatch
 ) -> None:
     class BrokenSession:
         def __enter__(self):
@@ -37,7 +37,7 @@ def test_readiness_endpoint_returns_503_when_database_is_unavailable(
 
     monkeypatch.setattr(health, "SessionLocal", lambda: BrokenSession())
 
-    response = client.get("/api/health/ready")
+    response = anonymous_client.get("/api/health/ready")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "database_unavailable"}

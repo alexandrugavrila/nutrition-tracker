@@ -24,7 +24,15 @@ import IngredientTable from "@/components/data/ingredient/IngredientTable";
 import IngredientModal from "@/components/common/IngredientModal";
 
 import { formatCellNumber } from "@/utils/utils";
-import { createIngredientLookup, macrosForIngredientPortion, ZERO_MACROS, findIngredientInLookup } from "@/utils/nutrition";
+import {
+  addMacroTotals,
+  scaleNutrient,
+  UNKNOWN_MACROS,
+  createIngredientLookup,
+  macrosForIngredientPortion,
+  ZERO_MACROS,
+  findIngredientInLookup,
+} from "@/utils/nutrition";
 import type { components } from "@/api-types";
 
 const NULL_UNIT_VALUE = "__NULL_UNIT__";
@@ -78,11 +86,11 @@ function FoodIngredientsForm({ food, dispatch, needsClearForm, recipeYield, onRe
 
   const perPortionMacros = useMemo(
     () => ({
-      calories: totalMacros.calories / parsedRecipeYield,
-      protein: totalMacros.protein / parsedRecipeYield,
-      fat: totalMacros.fat / parsedRecipeYield,
-      carbs: totalMacros.carbs / parsedRecipeYield,
-      fiber: totalMacros.fiber / parsedRecipeYield,
+      calories: scaleNutrient(totalMacros.calories, 1 / parsedRecipeYield),
+      protein: scaleNutrient(totalMacros.protein, 1 / parsedRecipeYield),
+      fat: scaleNutrient(totalMacros.fat, 1 / parsedRecipeYield),
+      carbs: scaleNutrient(totalMacros.carbs, 1 / parsedRecipeYield),
+      fiber: scaleNutrient(totalMacros.fiber, 1 / parsedRecipeYield),
     }),
     [parsedRecipeYield, totalMacros],
   );
@@ -175,7 +183,7 @@ function FoodIngredientsForm({ food, dispatch, needsClearForm, recipeYield, onRe
       }
       const dataIngredient = findIngredientInLookup(ingredientLookup, ingredientId);
       if (!dataIngredient) {
-        return { ...ZERO_MACROS };
+        return { ...UNKNOWN_MACROS };
       }
       return macrosForIngredientPortion({
         ingredient: dataIngredient,
@@ -217,12 +225,7 @@ function FoodIngredientsForm({ food, dispatch, needsClearForm, recipeYield, onRe
     const totals = food.ingredients.reduce(
       (acc, ingredient) => {
         const macros = calculateTotalIngredientMacros(ingredient);
-        acc.calories += macros.calories;
-        acc.protein += macros.protein;
-        acc.fat += macros.fat;
-        acc.carbs += macros.carbs;
-        acc.fiber += macros.fiber;
-        return acc;
+        return addMacroTotals(acc, macros);
       },
       { ...ZERO_MACROS }
     );

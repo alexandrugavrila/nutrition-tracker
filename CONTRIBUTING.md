@@ -66,7 +66,7 @@ Recommended flow when starting or updating a branch:
 3. Create or jump into the branch worktree:
 
    ```pwsh
-   pwsh ./scripts/switch-worktree-branch.ps1 feature/my-feature
+   pwsh ./scripts/switch-worktree-branch.ps1 feature/my-feature -CopyEnv
    ```
 
    For a new branch, the helper always uses the latest `origin/development` as its base, even when invoked from `nutrition-main`. Existing local or remote branches retain their existing ancestry. The script creates `nutrition-feature-my-feature` under the worktree parent (default: parent of the primary clone; override with `NUTRITION_WORKTREE_PARENT`), pushes a new branch with its upstream, and optionally opens VS Code. Pass `-SkipVSCode` to stay in the terminal or `-NewVSCodeWindow` for a new window.
@@ -225,7 +225,8 @@ Required `.env.production` values (defaults shown where applicable):
 | `POSTGRES_PASSWORD` | Yes | — | DB password for Postgres container init. |
 | `POSTGRES_DB` | Yes | — | Database name for Postgres container init. |
 | `DATABASE_URL` | Yes | — | Backend SQLAlchemy connection string. |
-| `USDA_API_KEY` | Yes | — | Required for USDA endpoints. |
+| `USDA_API_KEY` | No | — | Required for USDA endpoints. |
+| `USDA_FOUNDATION_FOODS_JSON` | Maintenance only | — | File path or URL consumed by the `usda-sync` Compose profile. |
 | `CORS_ALLOW_ORIGINS` | Yes | — | Comma-separated origins (`https://app.example.com`). Keep this tight in production. |
 | `DB_AUTO_CREATE` | No | `false` | Leave false when running migrations separately. |
 | `EDGE_IMAGE` | No | `nginx:1.27-alpine` | Edge proxy image override. |
@@ -246,6 +247,24 @@ Runtime controls in production compose:
   - Edge: `GET /healthz` over HTTPS, proxied to backend readiness.
 - Resource guardrails are enabled with CPU/memory limits + reservations and conservative `ulimit` defaults (`nofile`, `nproc`) for each service.
 - All services emit logs to stdout/stderr and Compose applies `json-file` log rotation (`max-size`, `max-file`, non-blocking mode).
+- `usda-sync` is a maintenance profile one-shot for USDA Foundation Foods ingestion:
+  ```bash
+  docker compose --env-file .env.production -f docker-compose.prod.yml --profile maintenance run --rm usda-sync
+  ```
+  `USDA_FOUNDATION_FOODS_JSON` is optional when configuring or starting the normal
+  production stack. The sync command requires it (or `--input`) only when invoked;
+  missing input exits with an error before loading data or opening a database session.
+  The default invocation imports/updates records without marking absent entries stale.
+  A URL is fetched by the container. A file path must exist **inside the container**;
+  setting this variable to a host path does not mount that file. For a local dataset,
+  mount its directory read-only and pass the container path (replace the host path):
+  ```bash
+  docker compose --env-file .env.production -f docker-compose.prod.yml --profile maintenance run --rm --volume "/absolute/host/usda:/input:ro" --env USDA_FOUNDATION_FOODS_JSON=/input/foundation.json usda-sync
+  ```
+  In PowerShell, use a quoted absolute host path such as
+  `"C:/datasets/usda:/input:ro"` for the same `--volume` option.
+  Run the database-free configuration/command regression tests with
+  `python -m pytest tests/test_usda_maintenance_config.py -q` (Docker Compose required).
 
 Deployment secret checklist:
 
@@ -355,9 +374,95 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
     - Always sources `scripts/lib/venv.ps1|.sh` to ensure the virtual environment is active.
 
 - `scripts/tests/run-e2e-tests.ps1` / `scripts/tests/run-e2e-tests.sh`
-  - Purpose: spin up a branch-isolated Docker Compose test stack, wait for the backend and frontend to become healthy, then execute both `pytest -m e2e` against `Backend/tests/test_e2e_api.py` and the Playwright browser suite under `Frontend/e2e/`.
-  - Flags: accepts additional pytest arguments (pass-through). Both variants honour `-h|--help`.
-  - Call graph: loads helpers from `scripts/lib/venv.*`, `scripts/lib/branch-env.*`, and `scripts/lib/compose-utils.*`; always shells into `scripts/docker/compose.ps1|.sh` (`up ...` to start, `down ...` to tear down), then runs `npm --prefix Frontend run e2e:install` followed by `npm --prefix Frontend run e2e`.
+  - Purpose: run migration-built PostgreSQL tests and authenticated API/browser E2E on disposable infrastructure.
+  - Parameters: additional pytest arguments apply to the API E2E invocation.
+  - Call graph: loads `scripts/lib/venv.*`, installs Playwright Chromium, then invokes `python -m testsupport.run_e2e`.
+  - The Python runner creates a uniquely named Compose project from `testsupport/docker-compose.e2e.yml`, with PostgreSQL data in tmpfs and a random loopback port. It starts API/Vite child processes on temporary ports and always terminates them and removes only its own Compose project.
+  - `testsupport.seed_accounts` creates two ordinary test accounts directly, avoiding production bootstrap/onboarding dependencies. It refuses existing accounts and requires the database guard described below.
+
+### Ownership expansion and adoption checkpoint
+
+`b42d8f0a315c` is the **pre-adoption expansion checkpoint**, following
+`a31c7e9f204b`. It is integration-only. Keep application writers stopped through
+expansion, the forthcoming adoption operation, and final ownership constraints.
+Do not deploy this intermediate application/schema as a finished account cutover.
+
+- Every existing ingredient starts with `is_shared=false`; every source mapping
+  starts `unverified`, including records with existing payload hashes.
+- Logs/stored food retain legacy `user_id` strings and gain nullable `owner_user_id`
+  foreign keys. Existing rows stay unassigned until adoption; new API writes populate
+  the authenticated owner. Reads use the foreign key, never a matching legacy string.
+- Shared visibility requires an explicit shared flag, no owner, and a verified
+  provider mapping. Unclassified rows are hidden from users and administrators.
+  Ordinary sourced ingredient creation currently remains personal and unverified;
+  the identifier-only trusted import interface is delivered in Phase 6.
+- `user_ingredient_preferences` uses `(user_id, ingredient_id)` as its key and a
+  composite foreign key to require a unit of that ingredient. No row means no override.
+  The existing ingredient-level default is preserved. Preference APIs and resolution
+  are implemented in Phase 6; adoption copies legacy personal choices in Phase 5.
+- `ownership_adoptions` records a completed mapping/version, owner, report and hash.
+  `ingredient_provenance_history` preserves personal provenance separately when
+  adoption releases a canonical mapping. Both remain empty during expansion.
+- Source verification stores status, timestamp, artifact checksum, normalization
+  version, and optional import-run reference. Sync runs can record artifact identity.
+  These fields do not automatically trust existing source strings or hashes.
+
+Run `python -m testsupport.run_schema_expansion` to rehearse a fresh installation
+and populated upgrades from `d3f0b1c2e7ad`, `b6a1f2c3d4e5`, `6b2f8f8d9c11`,
+`8c9d0e1f2a3b`, `91b4c6d8e2f0`, and `a31c7e9f204b`. It creates a unique tmpfs
+PostgreSQL stack, validates the complete migration graph and model drift, compares
+all existing column values/IDs/references, and cleans up its own resources. The
+backend CI job runs this rehearsal. An actual deployed revision must be identified
+and rehearsed before deployment; the synthetic fixtures are not a production restore.
+
+No migration stamping or `create_all` is used for these PostgreSQL checks. Existing
+migration files remain unchanged. An Alembic downgrade discards expansion metadata;
+use the roadmap's matched backup/image recovery procedure for a failed cutover.
+
+### Authentication and starter data
+
+Account creation and bootstrap create empty accounts, without starter data or a USDA key.
+Apply migrations before using the commands. Set `DATABASE_URL` explicitly; these commands
+never start containers, restore data, create tables, or select a branch database for you.
+Activate the intended Python environment before using the script wrappers.
+
+- `scripts/auth/create-admin.ps1` / `.sh` wrap `Backend.commands.create_admin`.
+  Flags: `--email <email> --display-name <name> [--password-stdin]`.
+  Hidden password entry with confirmation is the default. Plaintext `--password` is no longer supported.
+  An existing administrator is unchanged (including disabled status); a non-admin email fails.
+- `scripts/auth/manage-account.ps1` / `.sh` wrap `Backend.commands.manage_account`.
+  Subcommands: `reset-password`, `activate`, `deactivate`. Select exactly one of
+  `--email <email>` or `--user-id <id>`. Password reset accepts `--password-stdin`.
+  These maintenance operations revoke all sessions in the same transaction.
+  `create-user --email <email> --display-name <name> [--password-stdin]` creates an empty,
+  active non-admin account; an existing email fails without changing the account.
+- `scripts/auth/seed-starter-data.ps1` / `.sh` wrap `Backend.commands.seed_starter_data`.
+  Select exactly one of `--email <email>` or `--user-id <id>`; optional `--manifest <path>`.
+  Seeding is explicit and transactional. Missing referenced catalog data rolls back the
+  entire seed. A durable per-user version marker prevents repeat seeding after edits or
+  deletions. Changing a completed manifest requires a new version. Existing matching names
+  are reused without overwriting them. Old installations are not marked seeded automatically.
+
+Both shell variants accept the Python CLI flags above verbatim. The legacy `.py` paths
+also delegate to these packaged modules. Production needs no source bind mount:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm backend python -m Backend.commands.create_admin --email admin@example.com --display-name Administrator
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm backend python -m Backend.commands.manage_account deactivate --email user@example.com
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm backend python -m Backend.commands.seed_starter_data --email user@example.com
+```
+
+For automation, deliver one password line from a secret manager over stdin and use
+`run --rm -T ... --password-stdin`. Never put passwords in command arguments or shell history.
+The `--manifest` path, if used in Docker, must be container-visible; mount custom manifests read-only.
+USDA endpoints remain unavailable without `USDA_API_KEY`; accounts and local starter data work.
+
+Run `python -m testsupport.run_account_commands_smoke` for production-image bootstrap,
+repeat/collision checks, explicit seeding, and account/session maintenance against a unique
+tmpfs PostgreSQL database. It builds the production target, uses no source mounts, runs
+migrations and a drift check, and removes its containers and test image. The production-smoke
+CI job runs this check too.
+
 
 ### Docker stack management
 
@@ -378,7 +483,8 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
 - `docker-compose.prod.yml`
   - Purpose: production runtime stack using prebuilt immutable images only (no host bind mounts), with an edge TLS proxy, runtime health probes, resource guardrails, and bounded log rotation.
   - Entry point: `docker compose --env-file .env.production -f docker-compose.prod.yml up -d`.
-  - Requirements: `.env.production` must define critical runtime variables (`BACKEND_IMAGE`, `FRONTEND_IMAGE`, database credentials, `DATABASE_URL`, `USDA_API_KEY`, `CORS_ALLOW_ORIGINS`), plus edge TLS certificate mount inputs (`EDGE_TLS_CERTS_DIR`) or Compose exits immediately via `${VAR:?error}` guards where configured.
+  - Maintenance entry point: `docker compose --env-file .env.production -f docker-compose.prod.yml --profile maintenance run --rm usda-sync`.
+  - Requirements: `.env.production` must define critical runtime variables (`BACKEND_IMAGE`, `FRONTEND_IMAGE`, database credentials, `DATABASE_URL`, `CORS_ALLOW_ORIGINS`), plus edge TLS certificate mount inputs (`EDGE_TLS_CERTS_DIR`) or Compose exits immediately via `${VAR:?error}` guards where configured. Foundation input is validated by the `usda-sync` command when invoked, not during Compose interpolation.
 
 ### Environment and worktree helpers
 
@@ -396,6 +502,7 @@ The repository keeps Bash and PowerShell twins for every contributor-facing scri
 - `scripts/switch-worktree-branch.ps1`
   - Purpose: fetch remote refs, create new working branches from the latest `origin/development`, create local tracking branches for remote-only branches, then interactively pick a branch, jump to its dedicated worktree (creating it if needed), optionally open VS Code, optionally start Docker Compose, and always activate the virtualenv.
   - Flags/parameters: `-Branch`, `-SkipVSCode`, `-NewVSCodeWindow`, `-CopyEnv` (copies the current worktree `.env` into the target when missing), `-StartWorkspaceStack`, and `-Data <test|prod>` (required with `-StartWorkspaceStack`).
+  - Recommended usage: `pwsh ./scripts/switch-worktree-branch.ps1 <branch> -CopyEnv`.
   - Call graph: invokes `scripts/env/activate-venv.ps1` and `scripts/docker/compose.ps1` when the corresponding switches are selected.
 
 ### Repository maintenance
@@ -505,7 +612,15 @@ pwsh ./scripts/tests/run-e2e-tests.ps1
 ./scripts/tests/run-e2e-tests.sh
 ```
 
-The e2e runners launch a temporary stack on the `TEST_*` ports, run both the API and browser suites against that stack, and clean up after completion.
+Install backend requirements and run `npm --prefix Frontend ci` first. The runners require Docker Compose, Node, and Playwright Chromium. They create a fresh PostgreSQL database, apply Alembic migrations, seed two ordinary accounts, run real cookie-authenticated API/browser tests, and clean up on failure or success. They never restore application backups or seed production CSVs.
+
+Backend tests use in-memory SQLite by default and **ignore ordinary `DATABASE_URL`**. For PostgreSQL validation, set `TEST_DATABASE_URL` to a PostgreSQL database whose name ends in `_test` and set `TEST_DATABASE_CONFIRM` to that exact name. URL query options are rejected. Tests create and migrate a unique schema, clear only its tables between tests, and drop only that schema afterward. Do not use a shared application database for testing.
+
+API fixtures are explicit: `anonymous_client`, `admin_client`, `user_a_client`, and `user_b_client`. The remaining admin-based legacy tests deliberately exercise existing ownerless catalog fixtures; they do not establish ordinary-user authorization. No fixture logs in every test automatically.
+
+The required runner sets `E2E_REQUIRED=1`; absent configuration, failed readiness, or failed login is an error. An ordinary unit-only run may skip the live E2E module when no port is configured. Direct API/browser invocation requires `DEV_BACKEND_PORT`, `PLAYWRIGHT_BASE_URL`, `E2E_EMAIL`, `E2E_OTHER_EMAIL`, and `E2E_PASSWORD` from a disposable test setup. Never use production credentials.
+
+`python -m testsupport.run_e2e` is also the cross-platform CI entry point. It applies migrations to newly created test infrastructure only; it is not a production deployment or upgrade-rehearsal command.
 
 Additional tooling:
 
@@ -564,7 +679,7 @@ Additional tooling:
 
 ## Continuous Integration (GitHub Actions)
 
-The CI workflow contains **backend**, **frontend**, **e2e**, and **production-smoke** jobs. A separate **branch-policy** workflow enforces the integration and release topology. The E2E job runs the existing API and Playwright suites against an isolated Docker test stack on a disposable runner checkout and always attempts teardown. It uses a temporary local branch to satisfy the branch-aware test helpers; that branch is never pushed.
+The CI workflow contains **backend**, **frontend**, **authenticated-e2e**, and **production-smoke** jobs. A separate **branch-policy** workflow enforces integration and release topology. Authenticated E2E uses the disposable runner described above, requires successful API/browser execution, and uploads browser failure artifacts. Add `authenticated-e2e` to required checks using `.github/BRANCH_PROTECTION.md`; editing the workflow does not change GitHub rulesets automatically.
 
 The backend job audits `Backend/requirements.txt` with `pip-audit` in a separate tool environment, including resolved transitive dependencies. Known vulnerabilities fail CI. The frontend job audits its committed npm lockfile. Run both audits when updating dependencies; passing application tests alone is not a security audit. Keep fixed release tags immutable and publish dependency fixes under a new release tag.
 
@@ -605,3 +720,342 @@ The backend job audits `Backend/requirements.txt` with `pip-audit` in a separate
 ---
 
 Thanks for contributing!
+
+
+### Legacy ownership adoption (Phase 5 integration checkpoint)
+
+This is a maintenance-only operation, not a deployment script. Do not run against an
+application database until writers are stopped, a verified backup exists, and the report
+has been reviewed. Use the candidate image with an explicitly selected `DATABASE_URL`.
+Keep the old application and Foundation maintenance jobs stopped through finalization.
+
+1. Upgrade only to `b42d8f0a315c`, the expansion checkpoint.
+2. Use the packaged `create_admin` and `manage_account create-user` commands to establish
+   exactly one active administrator and one active ordinary account. Existing accounts
+   are never silently deleted or promoted. The ordinary account will own all legacy data.
+3. Generate the report (read-only, repeatable-read transaction):
+   `python -m Backend.commands.adopt_legacy --email owner@example.com --dry-run --report adoption.json`.
+   The output file must not already exist. Treat it as private operational data.
+4. Review blockers, counts, IDs, previous identities, deterministic name suffixes,
+   source archives, and shopping preferences. Duplicate names retain the lowest ID's
+   name; remaining records receive collision-safe ` [legacy #ID]` suffixes, truncated
+   to the column limit. Conflicting per-user shopping preferences require resolution.
+5. Apply exactly that report:
+   `python -m Backend.commands.adopt_legacy --email owner@example.com --apply --report adoption.json`.
+   Changed data invalidates the report. Apply holds table locks (five-second lock timeout)
+   and updates ownership, names, provenance, preferences and the ledger transactionally.
+6. Immediately run `python -m alembic -c Backend/alembic.ini upgrade head`.
+   Revision `c53e9a1b426d` checks the recorded post-adoption fingerprint before enforcing
+   ownership. Any intervening data write blocks finalization. Investigate changes; do not
+   edit the ledger, stamp the revision, or use downgrade as recovery. Restore the matched
+   backup/image pair when the cutover cannot safely continue.
+
+`--user-id` can replace `--email`. Both report and input paths are container-visible:
+mount a dedicated host report directory for dry-run output, then mount the reviewed
+file read-only for apply, for example `--mount type=bind,src=/host/adoption.json,dst=/reports/adoption.json,readonly`
+with `docker run` and `--report /reports/adoption.json`. The host path is not passed as the
+container's input path. No source-code mount is needed.
+
+Every legacy ingredient becomes personal, including externally sourced or previously
+shared ingredients. Canonical provider mappings are archived in
+`ingredient_provenance_history` and detached; IDs, recipe references, persisted units,
+plan payloads, historical nutrition and legacy device identities remain unchanged.
+Existing per-user shopping choices transfer to the designated owner, with legacy defaults
+used only when no override exists. Catalog defaults remain unchanged.
+`all-personal-v1` records the owner and original report. Reapplying the original report
+for the same owner is a no-op, including after later personal edits; another owner or
+report is rejected. The command never imports or publishes catalog records.
+
+Empty fresh databases may upgrade directly to head because no legacy content requires
+adoption; the checkpoint/bootstrap/empty-adoption path is also rehearsed. Populated
+upgrades must use the checkpoint. Accounts and seeding remain separate operations.
+Foundation synchronization is available through the Phase 9 operator command after adoption.
+Missing input fails before I/O. External catalog records are immutable through ordinary CRUD;
+editing requires an explicit personal copy, without repointing recipes.
+
+The script catalog entry for adoption is the cross-platform Python module
+`Backend.commands.adopt_legacy` (flags above; intentionally no additional shell wrapper).
+`python -m testsupport.run_schema_expansion` now rehearses expansion, adoption, final
+constraints and drift across the supported starting revisions in disposable PostgreSQL
+schemas, including stale reports, injected failure rollback, reference blockers,
+preference conflicts, repeated apply, preserved values and authenticated owner/admin
+visibility. The existing PowerShell/Bash schema-validation wrappers both call this module.
+`python -m testsupport.run_account_commands_smoke` also exercises packaged adoption in
+an isolated schema inside the production image, without a source mount or USDA key.
+
+
+### Account and catalog boundaries (Phase 6)
+
+USDA ingredients are canonical backend records. Importing one adds it to the signed-in
+user's ingredient list; other accounts do not acquire that selection. Repeated imports
+of the same provider ID reuse the canonical row. Ordinary CRUD always creates personal
+ingredients and rejects client ownership, publication and provenance assertions.
+Administrators have the same personal-content boundary as ordinary accounts.
+
+- `POST /api/usda/import/{fdc_id}` accepts only the identifier in the URL (no body or
+  `{}`). The backend fetches and verifies USDA data. Search/detail and both tag-creation
+  APIs require authentication. Shared tags remain a common vocabulary.
+- `POST /api/ingredients/{id}/copy` creates an independent personal ingredient and
+  units. Historical provenance is archived without a provider mapping. Existing recipes
+  continue to reference the original ingredient. The editor exposes this explicit action;
+  canonical fields cannot be edited, including by an administrator.
+- `DELETE /api/ingredients/{id}/selection` removes an unused canonical selection, not
+  the canonical row. References in that user's recipes, plans, stored food or logs block
+  removal. Personal ingredient/food deletion also returns HTTP 409 while referenced.
+- `PUT /api/ingredients/{id}/shopping-preference` takes `{"unit_id":123}` or
+  `{"unit_id":null}`. The unit must belong to the accessible ingredient. Null clears the
+  override; resolution uses the user override, catalog default, then canonical gram unit.
+- Plan writes validate food/ingredient IDs and recipe overrides. Another account's
+  personal IDs return 404. Persisted unit conversions cannot be changed in place; add a
+  new named unit so saved references retain their meaning.
+
+Migration `d64f0b2c537e` follows the Phase 5 finalization revision. It adds per-user catalog
+selections and shared login budgets, preserving selections implied by existing recipes,
+plans, preferences, stored food and logs. The pre-adoption checkpoint remains
+`b42d8f0a315c`; historical migration IDs and the all-personal adoption policy are unchanged.
+
+Cookie-authenticated mutations and login require a matching `Origin` (or a same-origin
+`Referer` fallback). API clients should send their configured application origin.
+`CORS_ALLOW_ORIGINS` must list exact trusted browser origins for cross-origin use;
+`*` grants neither credentialed CORS access nor mutation authorization. Same-origin
+requests through the application proxy are supported. Development Compose defaults to
+localhost and 127.0.0.1 at `DEV_FRONTEND_PORT` (3000 by default); set
+`CORS_ALLOW_ORIGINS` explicitly for another development hostname or direct local backend.
+Production requires secure session
+cookies and HTTPS; explicit `SESSION_SECURE_COOKIE=false` is rejected in production.
+Password changes and operator reset/deactivation revoke sessions transactionally.
+Authenticated mutations lock the account row to coordinate reference edits/deletion and
+account changes.
+
+Login budgets persist across workers: at most 10 attempts per normalized email and 100
+per client address in a fixed 15-minute window, including successful logins. Exceeding a
+budget returns 429 with `Retry-After`; expired budget rows are periodically removed.
+Configure the reverse proxy/server's trusted forwarding behavior deliberately: the limiter
+uses the server's resolved client address and does not parse arbitrary forwarded headers.
+A shared proxy address can therefore share the address budget. Actual production HTTPS
+and proxy behavior still require Phase 10 validation.
+
+Phase 8 preserves missing nutrients as null through trusted import, previews, calculations,
+and new snapshots. Reimport refreshes verified canonical nutrition while retaining units,
+IDs, personal copies and historical snapshots. Foundation synchronization follows the Phase 9 contract below.
+
+`python -m testsupport.run_e2e` runs the PostgreSQL suite and authenticated API/browser
+workflows with a loopback USDA fixture through the real server import path. Its test-only
+ASGI wrapper validates the disposable database and is not included in production images.
+No live USDA key or existing application database is required. See
+[Phase 6 evidence](docs/integration-phase-6.md) for validation and remaining release gates.
+
+
+### Browser account isolation (Phase 7)
+
+Protected React providers mount only after `/api/auth/me` resolves. Each confirmed account
+scope has an immutable user ID and a generation key. Identity checks suspend the old scope,
+abort its requests, and unmount account-dependent caches and UI before protected content
+can render again. Logout, focus/visibility changes, browser history restoration and
+cross-tab session-change events trigger this boundary. Failed identity checks fail closed.
+
+All application session-storage keys use `nutrition:v2:<encoded-user-id>:<workflow-key>`.
+The hook covers planning, shopping, cooking, ingredient drafts and food drafts. Returning
+to an account can restore its own persisted workflow state; another account cannot load
+it. Transient component state and fetched caches are discarded. Legacy unscoped application
+keys are removed from session/local storage because their ownership cannot be established;
+they are not adopted into whichever account signs in first. Unrelated storage is retained.
+Malformed or incompatible persisted values fall back to defaults; denied storage falls
+back to memory. No anonymous workflow state is persisted.
+
+Protected API calls must use `useAccountClient()` or `useAccountFetch()` under
+`AccountScopeContext`, never the unscoped authentication client or raw fetch. Async
+callbacks retain the original scope, including multi-request operations; old scopes cannot
+issue follow-up writes or consume delayed bodies. Storage callbacks also stop writing when
+their scope is invalidated. Keep the provider keyed by `scope.key` so hook initialization
+cannot reuse another account's state.
+
+Every protected browser request sends `X-Account-ID` as an expected identity. The backend
+still authenticates exclusively with the session cookie. If another tab changes that cookie,
+a mismatched expectation returns 409 with `X-Account-Mismatch: 1` before route operations,
+including logout. This closes the cookie-change race between checking identity and saving
+a draft. Requests from existing API clients may omit the header; it grants no permission.
+A 401 or mismatch invalidates the browser scope and rechecks identity. Trusted CORS origins
+can read the mismatch header. No database schema change is required.
+
+Cross-tab messages contain only a session-change notification, never account data or tokens.
+BroadcastChannel is used when available, with a local-storage event fallback. Storage or
+channel availability does not replace the request identity guard. Real HTTPS deployment
+and the remaining coordinated release gates are still Phase 10 work.
+
+The shared `testsupport.run_e2e` runner seeds a separate ordinary-account pair for
+browser isolation cases, preserving real login limits across the expanded suite. Both
+shell E2E wrappers use this same runner. Failure diagnostics tolerate Windows console
+encoding without masking the original test failure.
+
+
+### Nutrient uncertainty (Phase 8)
+
+Migration `e75a1c3d648f`, after `d64f0b2c537e`, makes nutrition and stored-food/log snapshot
+nutrients nullable. It does not rewrite numeric history: an old zero stays zero. Apply the
+existing expansion/adoption checkpoints before reaching this revision. Downgrading this
+revision rejects any null nutrient instead of fabricating a replacement value.
+
+API clients may omit unknown nutrients or send null; actual zero is a known value. Blank
+personal ingredient fields mean unknown. Known values must be finite and nonnegative.
+The frontend displays unavailable nutrients and incomplete totals as **Unavailable**. Each
+nutrient propagates independently through addition, portions, recipe yields, planning,
+cooking and logs. Zero quantity contributes zero; a missing ingredient makes its recipe
+totals unknown. User-entered daily targets remain numeric.
+
+USDA per-100-gram data is converted to per-gram values without filling omissions. Supported
+explicit macro mass units are converted to grams; unsupported units remain unknown. Liquid
+and unsupported bases are not guessed. The authenticated identifier-only import refreshes
+nutrition on an existing verified canonical ingredient and records its artifact hash and
+normalization version (`usda-per-g-nullable-v2`). It preserves ingredient/unit IDs and unit
+conversions. Personal copies, stored batches and daily logs retain their own values.
+There is no automatic reinterpretation of old zeroes or publication of personal ingredients.
+
+`python -m testsupport.run_schema_expansion` also compares nutrition and snapshot rows
+before/after the new revision. `python -m testsupport.run_e2e` covers incomplete USDA import,
+recipe planning, nullable cooking snapshots, logging and reload using a deterministic
+provider fixture. These runners only use disposable PostgreSQL databases; no live USDA key
+or application database is needed. See [Phase 8 evidence](docs/integration-phase-8.md).
+
+
+### Foundation catalog maintenance (Phase 9)
+
+Run maintenance after completing adoption/final constraints. The packaged cross-platform
+entry point is `python -m Backend.commands.sync_usda_foundation`; no additional shell
+wrapper is needed. `--input` (or `USDA_FOUNDATION_FOODS_JSON`) accepts a container-visible
+JSON/ZIP file or download URL. The production Compose service stays in the `maintenance`
+profile; its default command never marks absent records stale. Mount host files read-only
+as shown above. No USDA API key is needed for a downloaded artifact.
+
+The script catalog's synchronization options are:
+
+- `--input PATH_OR_URL`: source artifact. ZIPs must contain exactly one JSON document.
+- `--expected-sha256 HEX`: SHA256 of the exact input bytes, including the ZIP bytes for a
+  ZIP artifact. A mismatch rejects the run before catalog mutation.
+- `--expected-count N`: reviewed number of records, before any deduplication (duplicates
+  are rejected, even when identical).
+- `--mark-stale --complete-snapshot`: explicitly request absent-entry stale marking and
+  attest that the artifact is the complete official Foundation release. Both expected
+  checksum and count are mandatory in this mode, as is the `FoundationFoods` envelope.
+
+For example, after independently reviewing the official download and recording its count
+and checksum (replace both placeholders):
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml --profile maintenance run --rm --volume "/absolute/host/usda:/input:ro" usda-sync python -m Backend.commands.sync_usda_foundation --input /input/foundation.zip --mark-stale --complete-snapshot --expected-count REVIEWED_COUNT --expected-sha256 REVIEWED_SHA256
+```
+
+A parseable file cannot prove completeness or authenticity. The operator must verify the
+release's provenance and completeness before making that attestation; do not derive the
+expected count from an arbitrary partial file merely to bypass the guard. Subset updates
+are supported without stale marking. Malformed/empty/truncated JSON, duplicate JSON keys,
+ambiguous archives, non-Foundation records, conflicting/duplicate IDs, invalid nutrients
+and invalid conversions reject the entire run.
+
+The whole catalog update is transactional. A PostgreSQL provider lock serializes bulk
+runs and excludes individual imports while a bulk run writes; different identifier imports
+can otherwise proceed concurrently. CLI synchronization requires PostgreSQL. A clean,
+dedicated SQLModel session is required when calling the service directly.
+
+Only verified shared USDA objects can be updated. A mapping to personal/unverified data
+blocks the run for operator reconciliation; it never publishes or repoints that record.
+Persisted units are never renamed, reweighted or deleted. New conversions get new unit IDs,
+comparison uses database precision, and new base units use `g`. A referenced `1 g` alias
+remains intact even when `g` also exists. Recipes and per-user shopping overrides retain
+their IDs. The catalog default may follow the current provider default; personal overrides
+and historical snapshots are never rewritten. Seeding remains a separate explicit command.
+
+Only absent records previously managed by a successful Foundation bulk run can become
+stale. API-only imports, other USDA datasets, unverified mappings and personal objects are
+excluded. Returning entries clear their stale marker. A fresh Foundation identifier import
+also clears staleness while retaining bulk membership; an import of a different data type
+removes that membership. Stale records are retained, including all references.
+
+`catalog_sync_runs` records success/failure, completion time, artifact SHA256, a sanitized
+artifact URI, normalization version and counts (or failure stage). Each synchronized source
+records its raw-record hash and bulk run ID. Failures roll back catalog changes before a
+separate failure audit is committed; an unavailable database cannot guarantee an audit row.
+CLI failures never echo upstream URLs or exception details. Missing input/guard errors
+exit before I/O. Bulk imports do not select ingredients into anyone's account automatically.
+
+`python -m testsupport.run_e2e` covers PostgreSQL locking, reference preservation and rollback
+alongside authenticated browser/API workflows. `python -m testsupport.run_account_commands_smoke`
+also runs repeated checksum-verified Foundation CLI imports inside the production image,
+without source mounts or live provider access. Both shell test paths use these same Python
+runners. See [Phase 9 evidence](docs/integration-phase-9.md) for the validation record.
+
+### Production cutover scripts (script catalog update)
+
+`prod/deploy.ps1` and `prod/deploy.sh` now take the same staged arguments:
+`prepare|maintenance|expand|report|finalize --evidence <directory>`, with
+stage-specific digest, revision, owner and report-checksum flags. They call
+`scripts/prod/cutover.py` (Python 3.11+), require an exact reviewed adoption report,
+and leave traffic closed. The previous single-tag deploy interface is removed. Set `PYTHON` to an explicit
+interpreter path if needed (including Git Bash on Windows).
+`prod/rollback.ps1` and `.sh` fail closed during the ownership cutover; use the
+clean-database recovery procedure rather than an unverified image-only rollback.
+The manual backup entry points remain available, but the cutover uses its own
+verified stopped-writer backup and separate-database restore checkpoint.
+
+Follow [the account/USDA release runbook](docs/release-cutover.md) for the exact
+sequence, HTTPS requirements, failure recovery and independent release gates.
+The packaged `Backend.commands.release_snapshot` emits only table/ID/content
+hashes, sequence state and database version for backup verification. It does not
+modify the database. Evidence and backups are sensitive and must stay outside Git.
+
+Local release validation: `python -m testsupport.run_release_cutover` builds
+production images, runs a populated cutover and actual restore, injects checkpoint
+failures, and performs an HTTPS Chromium account-isolation smoke. It requires
+Docker, OpenSSL, installed frontend dependencies and Playwright Chromium; missing
+tooling fails the run. The temporary certificate is for localhost only. CI runs
+this as the required `release-cutover` job; remote success must be verified for
+the actual candidate commit before integration.
+
+### Rehearsing published release images
+
+Pass both `--backend-image <repository@sha256:digest>` and
+`--frontend-image <repository@sha256:digest>` to
+`python -m testsupport.run_release_cutover` to pull and rehearse existing images.
+This mode never builds replacement images and never deletes the supplied images.
+Without those flags, the runner builds and removes temporary local images as before.
+Evidence records the input references, resolved image IDs and image mode. Tags,
+incomplete pairs and malformed digests fail before starting Docker work.
+The existing snapshot and explicitly reviewed legacy-repair flags remain available.
+
+Both publish script variants now point to the digest-based rehearsal and staged
+`deploy prepare` flow. The production environment example describes only the
+internal HTTP bind; certificates belong to the selected external HTTPS ingress.
+The branch-protection contract requires `release-cutover` as well as the other
+five checks. Documentation changes do not themselves change GitHub enforcement.
+
+LAN-only home-server topology and pending inventory are recorded in [home-server preparation](docs/home-server-preparation.md). The Caddy example is a proposed guest-host configuration, not a deployed service.
+
+
+### Private homelab HTTP deployment
+
+The home deployment explicitly defers HTTPS to a separate infrastructure project.
+Follow [home-server preparation](docs/home-server-preparation.md) and the
+[VM provisioning guide](docs/home-vm-provisioning.md). Production defaults still
+require secure cookies. Private HTTP requires both `SESSION_SECURE_COOKIE=false`
+and `ALLOW_INSECURE_HTTP=true`, plus explicit HTTP `CORS_ALLOW_ORIGINS`.
+Keep `ENVIRONMENT=production` and `DB_AUTO_CREATE=false`; restrict edge access to
+the intended network. HTTP traffic is unencrypted. Record HTTPS release checks
+as deferred for this owner-selected deployment, not passed. Existing HTTPS
+rehearsals remain useful regression coverage and are not removed.
+
+
+The disposable `testsupport.run_release_cutover` stack orders nginx startup after
+its backend/frontend dependencies so upstream DNS names exist at startup. Failed
+readiness checks print the last connection error and bounded service logs before
+cleanup. The production Compose file already orders services using health checks.
+
+The release runner accepts `--transport http` for the explicitly selected private
+HTTP deployment. HTTPS remains the default. Both modes use production settings,
+isolated data and loopback-only ports. The HTTP mode explicitly enables insecure
+transport and checks the named session cookie is HttpOnly/SameSite=Lax without
+Secure; HTTPS requires Secure. Both reject an untrusted-origin logout and verify
+the session survives that rejection. CI runs both modes in `release-cutover` and
+retains separate logs. Append the same transport flag to historical or published
+digest rehearsals; this does not validate router rules or deploy a permanent site.
+The existing `release_https_smoke.cjs` filename and `RELEASE_HTTPS_ORIGIN` variable
+remain compatible; `RELEASE_TRANSPORT=http` is mandatory for an HTTP origin.

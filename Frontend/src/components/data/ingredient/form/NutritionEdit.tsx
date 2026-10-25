@@ -1,15 +1,16 @@
+import { scaleNutrient } from "@/utils/nutrition";
 import React, { useCallback, useEffect, useState } from "react";
 import { TextField, Typography } from "@mui/material";
 import { roundNutritionValue } from "@/utils/nutritionPrecision";
 
 function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) {
   const [multiplier, setMultiplier] = useState(1);
-  const [displayNutrition, setDisplayedNutrition] = useState({
-    calories: 0,
-    protein: 0,
-    carbohydrates: 0,
-    fat: 0,
-    fiber: 0,
+  const [displayNutrition, setDisplayedNutrition] = useState<Record<string, number | string | null>>({
+    calories: null,
+    protein: null,
+    carbohydrates: null,
+    fat: null,
+    fiber: null,
   });
   const isUsdaSource = ingredient?.source === "usda";
 
@@ -19,43 +20,6 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
     "& input": {
       marginLeft: "3ch",
     },
-  };
-
-  const shouldClearOnFocus = (value: unknown) => {
-    if (value === "" || value == null) {
-      return false;
-    }
-
-    if (typeof value === "number") {
-      return value === 0;
-    }
-
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed === "") {
-        return false;
-      }
-
-      const normalized = trimmed.replace(",", ".");
-      const parsed = Number.parseFloat(normalized);
-      return !Number.isNaN(parsed) && parsed === 0;
-    }
-
-    return false;
-  };
-
-  const handleFieldFocus = (key) => {
-    setDisplayedNutrition((prev) => {
-      const current = prev[key];
-      if (!shouldClearOnFocus(current)) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        [key]: "",
-      };
-    });
   };
 
   const handleFieldEdit = (key, value) => {
@@ -72,11 +36,11 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
   };
   const getRoundedDisplayNutrition = useCallback(
     (targetMultiplier: number) => ({
-      calories: roundNutritionValue((ingredient?.nutrition?.calories ?? 0) * targetMultiplier),
-      protein: roundNutritionValue((ingredient?.nutrition?.protein ?? 0) * targetMultiplier),
-      carbohydrates: roundNutritionValue((ingredient?.nutrition?.carbohydrates ?? 0) * targetMultiplier),
-      fat: roundNutritionValue((ingredient?.nutrition?.fat ?? 0) * targetMultiplier),
-      fiber: roundNutritionValue((ingredient?.nutrition?.fiber ?? 0) * targetMultiplier),
+      calories: roundNutritionValue(scaleNutrient(ingredient?.nutrition?.calories, targetMultiplier)),
+      protein: roundNutritionValue(scaleNutrient(ingredient?.nutrition?.protein, targetMultiplier)),
+      carbohydrates: roundNutritionValue(scaleNutrient(ingredient?.nutrition?.carbohydrates, targetMultiplier)),
+      fat: roundNutritionValue(scaleNutrient(ingredient?.nutrition?.fat, targetMultiplier)),
+      fiber: roundNutritionValue(scaleNutrient(ingredient?.nutrition?.fiber, targetMultiplier)),
     }),
     [ingredient],
   );
@@ -86,7 +50,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
     const normalized = Object.keys(displayNutrition).reduce((acc, key) => {
       const raw = displayNutrition[key];
       const parsed = parseFloat(String(raw).replace(",", "."));
-      const numericValue = Number.isNaN(parsed) ? 0 : roundNutritionValue(parsed);
+      const numericValue = Number.isNaN(parsed) ? null : roundNutritionValue(parsed);
       return { ...acc, [key]: numericValue };
     }, {});
 
@@ -95,11 +59,11 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
     // Calculate nutrition per gram
     const baseMultiplier = multiplier || 1;
     const updatedNutrition = {
-      calories: normalized.calories / baseMultiplier,
-      protein: normalized.protein / baseMultiplier,
-      carbohydrates: normalized.carbohydrates / baseMultiplier,
-      fat: normalized.fat / baseMultiplier,
-      fiber: normalized.fiber / baseMultiplier,
+      calories: scaleNutrient(normalized.calories, 1 / baseMultiplier),
+      protein: scaleNutrient(normalized.protein, 1 / baseMultiplier),
+      carbohydrates: scaleNutrient(normalized.carbohydrates, 1 / baseMultiplier),
+      fat: scaleNutrient(normalized.fat, 1 / baseMultiplier),
+      fiber: scaleNutrient(normalized.fiber, 1 / baseMultiplier),
     };
     dispatch({ type: "SET_INGREDIENT", payload: { ...ingredient, nutrition: updatedNutrition } });
   };
@@ -141,13 +105,13 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
         fiber: "",
       });
 
-      // Keep underlying state numeric to avoid type issues elsewhere
+      // Blank nutrient inputs represent unavailable values.
       const clearedNutrition = {
-        calories: 0,
-        protein: 0,
-        carbohydrates: 0,
-        fat: 0,
-        fiber: 0,
+        calories: null,
+        protein: null,
+        carbohydrates: null,
+        fat: null,
+        fiber: null,
       };
       dispatch({ type: "SET_INGREDIENT", payload: { ...ingredient, nutrition: clearedNutrition } });
     }
@@ -161,6 +125,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+      <Typography variant="caption">Blank nutrients are unavailable; incomplete totals remain unavailable.</Typography>
       {isUsdaSource && (
         <Typography variant="caption" color="text.secondary" sx={{ mx: 1 }}>
           USDA-sourced nutrition is read-only.
@@ -169,8 +134,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
       <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
       <TextField
         label="Calories"
-        value={displayNutrition.calories}
-        onFocus={() => handleFieldFocus("calories")}
+        value={displayNutrition.calories ?? ""}
         onChange={(e) => handleFieldEdit("calories", e.target.value)}
         onBlur={handleFieldEditFinish}
         variant="outlined"
@@ -183,8 +147,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
       />
       <TextField
         label="Protein"
-        value={displayNutrition.protein}
-        onFocus={() => handleFieldFocus("protein")}
+        value={displayNutrition.protein ?? ""}
         onChange={(e) => handleFieldEdit("protein", e.target.value)}
         onBlur={handleFieldEditFinish}
         variant="outlined"
@@ -197,8 +160,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
       />
       <TextField
         label="Carbs"
-        value={displayNutrition.carbohydrates}
-        onFocus={() => handleFieldFocus("carbohydrates")}
+        value={displayNutrition.carbohydrates ?? ""}
         onChange={(e) => handleFieldEdit("carbohydrates", e.target.value)}
         onBlur={handleFieldEditFinish}
         variant="outlined"
@@ -211,8 +173,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
       />
       <TextField
         label="Fat"
-        value={displayNutrition.fat}
-        onFocus={() => handleFieldFocus("fat")}
+        value={displayNutrition.fat ?? ""}
         onChange={(e) => handleFieldEdit("fat", e.target.value)}
         onBlur={handleFieldEditFinish}
         variant="outlined"
@@ -225,8 +186,7 @@ function NutritionEdit({ ingredient, dispatch, needsClearForm, needsFillForm }) 
       />
       <TextField
         label="Fiber"
-        value={displayNutrition.fiber}
-        onFocus={() => handleFieldFocus("fiber")}
+        value={displayNutrition.fiber ?? ""}
         onChange={(e) => handleFieldEdit("fiber", e.target.value)}
         onBlur={handleFieldEditFinish}
         variant="outlined"

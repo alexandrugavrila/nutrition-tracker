@@ -7,6 +7,8 @@ import {
   macrosForIngredientPortion,
   scaleMacroTotals,
   ZERO_MACROS,
+  UNKNOWN_MACROS,
+  sumMacroTotals,
 } from "@/utils/nutrition";
 import type { FoodRead, IngredientRead } from "@/utils/nutrition";
 
@@ -93,7 +95,7 @@ describe("macrosForIngredientPortion", () => {
     });
   });
 
-  it("returns zero macros for malformed input values", () => {
+  it("returns unknown macros for malformed input values", () => {
     const ingredient = makeIngredient({
       units: [
         { id: 30, name: "mystery", grams: "invalid" },
@@ -113,7 +115,7 @@ describe("macrosForIngredientPortion", () => {
       quantity: "not-a-number",
     });
 
-    expect(result).toEqual(ZERO_MACROS);
+    expect(result).toEqual(UNKNOWN_MACROS);
   });
 
   it("treats USDA nutrition as rounded per-gram base values for larger portions", () => {
@@ -215,8 +217,8 @@ describe("scaleMacroTotals", () => {
   it("returns zero totals when multiplier is invalid", () => {
     const totals = { calories: 10, protein: 5, fat: 2, carbs: 3, fiber: 1 };
     expect(scaleMacroTotals(totals, 0)).toEqual(ZERO_MACROS);
-    expect(scaleMacroTotals(totals, Number.NaN)).toEqual(ZERO_MACROS);
-    expect(scaleMacroTotals(totals, -1)).toEqual(ZERO_MACROS);
+    expect(scaleMacroTotals(totals, Number.NaN)).toEqual(UNKNOWN_MACROS);
+    expect(scaleMacroTotals(totals, -1)).toEqual(UNKNOWN_MACROS);
   });
 });
 
@@ -252,14 +254,13 @@ describe("macrosForFood", () => {
 
   const lookup = createIngredientLookup([ingredientA, ingredientB]);
 
-  it("sums macros, applies overrides, and ignores missing ingredients", () => {
+  it("sums macros and applies overrides", () => {
     const food = {
       id: 1,
       name: "Fixture Food",
       ingredients: [
         { ingredient_id: ingredientA.id, unit_id: 11, unit_quantity: 2 },
         { ingredient_id: ingredientB.id, unit_id: 21, unit_quantity: 1.5 },
-        { ingredient_id: 999, unit_id: 99, unit_quantity: 10 },
       ],
     } as unknown as FoodRead;
 
@@ -278,10 +279,29 @@ describe("macrosForFood", () => {
     });
   });
 
-  it("returns zero macros when food has no ingredients", () => {
-    expect(macrosForFood(undefined, lookup)).toEqual(ZERO_MACROS);
+  it("returns unknown macros when food data is missing", () => {
+    expect(macrosForFood(undefined, lookup)).toEqual(UNKNOWN_MACROS);
     expect(macrosForFood({ id: 2, name: "Empty" } as FoodRead, lookup)).toEqual(
-      ZERO_MACROS,
+      UNKNOWN_MACROS,
     );
+  });
+});
+
+describe("nutrient uncertainty", () => {
+  it("propagates missing values independently through portions, recipes and totals", () => {
+    const ingredient = makeIngredient({ nutrition: { calories: 2, protein: null, fat: 0, carbohydrates: 3, fiber: null } });
+    const portion = macrosForIngredientPortion({ ingredient, quantity: 10 });
+    expect(portion).toEqual({ calories: 20, protein: null, fat: 0, carbs: 30, fiber: null });
+    const food = { ingredients: [{ ingredient_id: ingredient.id, unit_quantity: 10 }] } as FoodRead;
+    const recipe = macrosForFood(food, createIngredientLookup([ingredient]));
+    expect(recipe).toEqual(portion);
+    expect(sumMacroTotals([recipe, { calories: 5, protein: 9, fat: 0, carbs: 2, fiber: 1 }]))
+      .toEqual({ calories: 25, protein: null, fat: 0, carbs: 32, fiber: null });
+    expect(scaleMacroTotals(portion, 0)).toEqual(ZERO_MACROS);
+    expect(scaleMacroTotals(portion, 0.5).protein).toBeNull();
+  });
+  it("does not present a partial recipe as a complete total", () => {
+    const food = { ingredients: [{ ingredient_id: 999, unit_quantity: 10 }] } as FoodRead;
+    expect(macrosForFood(food, new Map())).toEqual(UNKNOWN_MACROS);
   });
 });

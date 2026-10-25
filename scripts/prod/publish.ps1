@@ -51,5 +51,6 @@ Ensure-ReleaseGitTag -Tag $resolvedTag -Push
 Invoke-PublishPush -Images $images
 
 Write-Host "Publish complete."
-Write-Host "Next deploy command:"
-Write-Host "  pwsh ./scripts/prod/deploy.ps1 -Tag $resolvedTag"
+Write-Host "Resolve the pushed backend/frontend registry digests, then rehearse those exact images."
+Write-Host "Follow docs/release-cutover.md; publishing does not deploy."
+Write-Host "Next: pwsh scripts/prod/deploy.ps1 prepare --evidence <directory> --backend <repository@sha256:digest> --frontend <repository@sha256:digest>"

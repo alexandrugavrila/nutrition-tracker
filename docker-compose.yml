@@ -27,6 +27,7 @@ services:
       WATCHFILES_FORCE_POLLING: "true"
       ALEMBIC_CONFIG: /app/Backend/alembic.ini
       USDA_API_KEY: "${USDA_API_KEY}"
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-http://localhost:${DEV_FRONTEND_PORT:-3000},http://127.0.0.1:${DEV_FRONTEND_PORT:-3000}}"
     depends_on:
       db:
         condition: service_healthy

@@ -1,4 +1,4 @@
-import type { MacroTotals } from "@/utils/nutrition";
+import type { MacroTargets } from "@/utils/nutrition";
 
 export type FoodOverride = {
   unitId: number;
@@ -24,6 +24,6 @@ export type PlanItem = FoodPlanItem | IngredientPlanItem;
 
 export type PlanPayload = {
   days: number;
-  targetMacros: MacroTotals;
+  targetMacros: MacroTargets;
   plan: PlanItem[];
 };

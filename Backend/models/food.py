@@ -1,7 +1,7 @@
 from typing import List, Optional, TYPE_CHECKING
 
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, String
+from sqlalchemy import Column, ForeignKey, String, UniqueConstraint
 
 from .food_ingredient import FoodIngredient
 from .possible_food_tag import PossibleFoodTag
@@ -16,9 +16,21 @@ class Food(SQLModel, table=True):
     """Food with associated ingredients and tags."""
 
     __tablename__ = "foods"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_foods_user_id_name"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(sa_column=Column(String(100), unique=True, nullable=False))
+    user_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(
+            String(36),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    name: str = Field(sa_column=Column(String(100), nullable=False))
 
     ingredients: List[FoodIngredient] = Relationship(
         back_populates="food",

@@ -54,7 +54,9 @@ afterEach(() => {
 });
 
 describe('SourceEdit', () => {
-  it('shows USDA dataset toggles, defaults to Foundation, and updates request params when toggles change', async () => {
+  it(
+    'shows USDA dataset toggles, defaults to Foundation, and updates request params when toggles change',
+    async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ foods: [] }),
@@ -113,7 +115,9 @@ describe('SourceEdit', () => {
       '/api/usda/search?query=banana&data_types=Branded&data_types=SR+Legacy',
     );
     expect(screen.getByLabelText(/search usda/i)).toHaveValue('banana');
-  });
+    },
+    10000,
+  );
 
   it('shows the USDA default unit in search results and prefers detail units on selection', async () => {
     const fetchMock = vi

@@ -82,3 +82,7 @@ Desktop.ini
 
 # === Database ===
 Database/*.sql~    # backup files
+
+# Cutover evidence may contain personal data and database backups.
+Database/backups/
+release-evidence/

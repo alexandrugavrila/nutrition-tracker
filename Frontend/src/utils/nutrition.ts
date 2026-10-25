@@ -5,11 +5,11 @@ export type FoodRead = components["schemas"]["FoodRead"];
 export type FoodIngredient = components["schemas"]["FoodIngredient"];
 
 export type MacroTotals = {
-  calories: number;
-  protein: number;
-  fat: number;
-  carbs: number;
-  fiber: number;
+  calories: number | null;
+  protein: number | null;
+  fat: number | null;
+  carbs: number | null;
+  fiber: number | null;
 };
 
 export type IngredientLookup = Map<string | number, IngredientRead>;
@@ -25,12 +25,33 @@ export type FoodOverride = {
   quantity?: number | null;
 };
 
-export const ZERO_MACROS: MacroTotals = {
+export type MacroTargets = { [K in keyof MacroTotals]: number };
+
+export const ZERO_TARGETS: MacroTargets = {
   calories: 0,
   protein: 0,
   fat: 0,
   carbs: 0,
   fiber: 0,
+};
+
+export const ZERO_MACROS: MacroTotals = { ...ZERO_TARGETS };
+
+export const UNKNOWN_MACROS: MacroTotals = { calories: null, protein: null, fat: null, carbs: null, fiber: null };
+
+export const parseNutrient = (value: unknown): number | null => {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+export const addNutrient = (a: number | null | undefined, b: number | null | undefined): number | null =>
+  a == null || b == null ? null : a + b;
+export const scaleNutrient = (value: number | null | undefined, multiplier: number): number | null => {
+  if (!Number.isFinite(multiplier) || multiplier < 0) return null;
+  // No quantity contributes zero, even when its composition is unknown.
+  if (multiplier === 0) return 0;
+  return value == null ? null : value * multiplier;
 };
 
 const ONE_GRAM = 1;
@@ -70,7 +91,7 @@ const readUnitGrams = (unit?: IngredientUnitBase | null): number => {
 
 const normalizeUnit = (unit: IngredientUnitBase): NormalizedIngredientUnit => ({
   ...unit,
-  grams: readUnitGrams(unit),
+  grams: parseNutrient((unit as IngredientUnitMaybeGrams).grams) ?? NaN,
 });
 
 const resolveUnit = (
@@ -100,20 +121,20 @@ const normalizeNutrition = (
   const fields = safeNutrition as NutritionFields;
   return {
     ...safeNutrition,
-    calories: toNumber(fields.calories),
-    protein: toNumber(fields.protein),
-    fat: toNumber(fields.fat),
-    carbohydrates: toNumber(fields.carbohydrates),
-    fiber: toNumber(fields.fiber),
+    calories: parseNutrient(fields.calories),
+    protein: parseNutrient(fields.protein),
+    fat: parseNutrient(fields.fat),
+    carbohydrates: parseNutrient(fields.carbohydrates),
+    fiber: parseNutrient(fields.fiber),
   } as IngredientNutrition;
 };
 
 const addMacro = (totals: MacroTotals, delta: MacroTotals): MacroTotals => ({
-  calories: totals.calories + delta.calories,
-  protein: totals.protein + delta.protein,
-  fat: totals.fat + delta.fat,
-  carbs: totals.carbs + delta.carbs,
-  fiber: totals.fiber + delta.fiber,
+  calories: addNutrient(totals.calories, delta.calories),
+  protein: addNutrient(totals.protein, delta.protein),
+  fat: addNutrient(totals.fat, delta.fat),
+  carbs: addNutrient(totals.carbs, delta.carbs),
+  fiber: addNutrient(totals.fiber, delta.fiber),
 });
 
 export const addMacroTotals = addMacro;
@@ -126,38 +147,38 @@ export const scaleMacroTotals = (
   totals: MacroTotals,
   multiplier: number,
 ): MacroTotals => {
-  const safeMultiplier = Number.isFinite(multiplier) ? multiplier : 0;
-  if (safeMultiplier <= 0) {
+  const safeMultiplier = multiplier;
+  if (safeMultiplier === 0) {
     return { ...ZERO_MACROS };
   }
 
   return {
-    calories: totals.calories * safeMultiplier,
-    protein: totals.protein * safeMultiplier,
-    fat: totals.fat * safeMultiplier,
-    carbs: totals.carbs * safeMultiplier,
-    fiber: totals.fiber * safeMultiplier,
+    calories: scaleNutrient(totals.calories, safeMultiplier),
+    protein: scaleNutrient(totals.protein, safeMultiplier),
+    fat: scaleNutrient(totals.fat, safeMultiplier),
+    carbs: scaleNutrient(totals.carbs, safeMultiplier),
+    fiber: scaleNutrient(totals.fiber, safeMultiplier),
   };
 };
 
 export const macrosForIngredientPortion = (
   { ingredient, unitId, quantity }: IngredientPortionInput,
 ): MacroTotals => {
-  if (!ingredient) return { ...ZERO_MACROS };
+  if (!ingredient) return { ...UNKNOWN_MACROS };
 
   const unit = resolveUnit(ingredient.units ?? [], unitId);
-  const gramsPerUnit = unit?.grams ?? 0;
+  const gramsPerUnit = unit?.grams ?? NaN;
   const normalizedNutrition = normalizeNutrition(ingredient.nutrition);
   const normalizedQuantity = quantity === undefined || quantity === null
     ? 0
-    : toNumber(quantity);
+    : parseNutrient(quantity) ?? NaN;
 
   return {
-    calories: normalizedNutrition.calories * gramsPerUnit * normalizedQuantity,
-    protein: normalizedNutrition.protein * gramsPerUnit * normalizedQuantity,
-    fat: normalizedNutrition.fat * gramsPerUnit * normalizedQuantity,
-    carbs: normalizedNutrition.carbohydrates * gramsPerUnit * normalizedQuantity,
-    fiber: normalizedNutrition.fiber * gramsPerUnit * normalizedQuantity,
+    calories: scaleNutrient(normalizedNutrition.calories, gramsPerUnit * normalizedQuantity),
+    protein: scaleNutrient(normalizedNutrition.protein, gramsPerUnit * normalizedQuantity),
+    fat: scaleNutrient(normalizedNutrition.fat, gramsPerUnit * normalizedQuantity),
+    carbs: scaleNutrient(normalizedNutrition.carbohydrates, gramsPerUnit * normalizedQuantity),
+    fiber: scaleNutrient(normalizedNutrition.fiber, gramsPerUnit * normalizedQuantity),
   };
 };
 
@@ -204,11 +225,11 @@ export const macrosForFood = (
   ingredientMap: IngredientLookup,
   overrides?: Record<string | number, FoodOverride>,
 ): MacroTotals => {
-  if (!food || !Array.isArray(food.ingredients)) return { ...ZERO_MACROS };
+  if (!food || !Array.isArray(food.ingredients)) return { ...UNKNOWN_MACROS };
 
   return food.ingredients.reduce((totals, foodIngredient) => {
     const ingredient = findIngredientInLookup(ingredientMap, foodIngredient.ingredient_id);
-    if (!ingredient) return totals;
+    if (!ingredient) return addMacro(totals, UNKNOWN_MACROS);
 
     const overrideKey = normalizeId(foodIngredient.ingredient_id);
     const override = overrideKey !== null ? overrides?.[overrideKey] : undefined;

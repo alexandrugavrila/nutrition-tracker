@@ -21,7 +21,10 @@ import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import NoteAltIcon from "@mui/icons-material/NoteAlt";
+import Button from "@mui/material/Button";
 import { Link } from "react-router-dom";
+
+import { useAuth } from "@/contexts/AuthContext";
 
 const drawerWidth = 240;
 
@@ -92,6 +95,7 @@ const Drawer = styled(MuiDrawer, {
 function MainLayout({ children }) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   const handleDrawerOpen = () => {
     setOpen(true);
@@ -126,6 +130,13 @@ function MainLayout({ children }) {
           <Typography variant="h6" noWrap component="div">
             Nutrition App
           </Typography>
+          <Box sx={{ flexGrow: 1 }} />
+          <Typography variant="body2" sx={{ mr: 2 }}>
+            {user?.display_name ?? user?.email}
+          </Typography>
+          <Button color="inherit" onClick={() => void logout()}>
+            Log out
+          </Button>
         </Toolbar>
       </AppBar>
       <Drawer variant="permanent" open={open}>

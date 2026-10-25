@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    func,
+)
 from sqlmodel import Field, SQLModel
 
 
@@ -22,6 +32,11 @@ class DailyLogEntry(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # Legacy identity retained verbatim until explicit adoption.
+    owner_user_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(36), ForeignKey("users.id"), nullable=False, index=True),
+    )
     user_id: str = Field(sa_column=Column(String(255), nullable=False, index=True))
     log_date: date = Field(sa_column=Column(Date, nullable=False, index=True))
     stored_food_id: Optional[int] = Field(
@@ -37,11 +52,11 @@ class DailyLogEntry(SQLModel, table=True):
         sa_column=Column(ForeignKey("foods.id", ondelete="SET NULL")),
     )
     portions_consumed: float = Field(sa_column=Column(Float, nullable=False))
-    calories: float = Field(sa_column=Column(Float, nullable=False))
-    protein: float = Field(sa_column=Column(Float, nullable=False))
-    carbohydrates: float = Field(sa_column=Column(Float, nullable=False))
-    fat: float = Field(sa_column=Column(Float, nullable=False))
-    fiber: float = Field(sa_column=Column(Float, nullable=False))
+    calories: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    protein: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    carbohydrates: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    fat: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
+    fiber: float | None = Field(default=None, sa_column=Column(Float, nullable=True))
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),

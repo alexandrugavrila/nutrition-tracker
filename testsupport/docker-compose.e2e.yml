@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: nutrition_test
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: nutrition_test
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nutrition_test -d nutrition_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

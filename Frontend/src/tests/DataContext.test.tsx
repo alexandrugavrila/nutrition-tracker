@@ -72,7 +72,7 @@ describe("DataProvider", () => {
         if (!response) {
           throw new Error(`Unexpected fetch to ${url.pathname}`);
         }
-        return response;
+        return response.clone();
       }) as unknown as typeof fetch;
 
     global.fetch = fetchMock;
@@ -153,7 +153,7 @@ describe("DataProvider", () => {
         if (!response) {
           throw new Error(`Unexpected fetch to ${url.pathname}`);
         }
-        return response;
+        return response.clone();
       }) as unknown as typeof fetch;
 
     global.fetch = fetchMock;
@@ -168,5 +168,6 @@ describe("DataProvider", () => {
     });
 
     await waitFor(() => expect(storedFoodHits).toBe(2));
+    expect(result.current?.fridgeInventory[0]?.remaining_portions).toBe(1);
   });
 });
