@@ -256,8 +256,12 @@ jobs:
       - run: npx --prefix Frontend playwright install --with-deps chromium
       - name: Production-image populated cutover, restored backup and HTTPS browser
         run: python -m testsupport.run_release_cutover > release-cutover.log 2>&1
+      - name: Explicit private HTTP production-image browser and cutover
+        run: python -m testsupport.run_release_cutover --transport http > release-cutover-http.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-cutover-evidence
-          path: release-cutover.log
+          path: |
+            release-cutover.log
+            release-cutover-http.log

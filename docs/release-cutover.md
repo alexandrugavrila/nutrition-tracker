@@ -190,3 +190,11 @@ to the rehearsal command. Both are required; mutable tags are rejected. This mod
 pulls the exact references, reports their local image IDs and retains those images
 after removing only the disposable test stack. Repeat on the home server's CPU
 architecture before approving deployment. Registry access must already be configured.
+
+For the owner-selected private HTTP deployment, add `--transport http`. This
+retains production mode and explicitly sets `SESSION_SECURE_COOKIE=false` and
+`ALLOW_INSECURE_HTTP=true` only in the disposable rehearsal backend. The browser
+asserts the named cookie's intended flags, rejects untrusted-origin logout, and
+checks A/B/A isolation and logout. HTTPS remains the default regression and runs
+separately in CI. A successful loopback HTTP rehearsal is not proof of LAN access
+restrictions, DNS, or the final site's origin configuration.
